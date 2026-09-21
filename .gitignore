@@ -1,0 +1,21 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Build
+bin/
+obj/
+
+# ASP.NET
+appsettings.Development.json
+
+# Uploads
+uploads/
+
+# Rider
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,16 @@
+global using System;
+global using System.Linq;
+global using System.Text;
+global using System.Security.Claims;
+global using System.IdentityModel.Tokens.Jwt;
+global using System.Threading.Tasks;
+global using Microsoft.AspNetCore.Mvc;
+global using Microsoft.AspNetCore.Authorization;
+global using Microsoft.EntityFrameworkCore;
+global using Microsoft.Extensions.Caching.Memory;
+global using Microsoft.IdentityModel.Tokens;
+global using ThueXe.Data;
+global using ThueXe.Models;
+global using ThueXe.Common;
+global using ThueXe.Services;
+global using ThueXe.Dtos;
