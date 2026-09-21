@@ -103,7 +103,12 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 // ── HTTPS ────────────────────────────────────────────────────────────
-app.UseHttpsRedirection();
+// Ở Development thì KHÔNG chuyển hướng: app Android gọi cleartext, bị đá sang HTTPS là
+// gặp chứng chỉ dev mà máy không tin, và lỗi hiện ra y hệt lỗi mất mạng.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 // ── Authentication / Authorization ───────────────────────────────────
 app.UseAuthentication();
