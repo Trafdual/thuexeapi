@@ -45,6 +45,10 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<OtpService>();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<FileStorageService>();
+builder.Services.AddScoped<QrService>();
+
+// Nam tac vu nen don don treo — thieu chung thi lich xe bi khoa chet.
+builder.Services.AddHostedService<ThueXe.Jobs.DonTreoService>();
 
 // ── MVC / API ─────────────────────────────────────────────────────────
 builder.Services.AddControllers();

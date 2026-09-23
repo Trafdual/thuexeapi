@@ -18,6 +18,9 @@ namespace ThueXe.Models
 
         public string Status { get; set; } = "HOAT_DONG";
 
+        /// NGUOI_DUNG | VAN_HANH. Người vận hành mới gọi được các đường /admin/**.
+        public string Role { get; set; } = "NGUOI_DUNG";
+
         public DateTimeOffset CreatedAt { get; set; }
             = DateTimeOffset.UtcNow;
 

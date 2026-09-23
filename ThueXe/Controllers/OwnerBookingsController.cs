@@ -8,8 +8,13 @@ namespace ThueXe.Controllers
     public class OwnerBookingsController : ControllerBase
     {
         private readonly ApplicationDbContext _db;
+        private readonly QrService _qr;
 
-        public OwnerBookingsController(ApplicationDbContext db) => _db = db;
+        public OwnerBookingsController(ApplicationDbContext db, QrService qr)
+        {
+            _db = db;
+            _qr = qr;
+        }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -42,6 +47,22 @@ namespace ThueXe.Controllers
             don.Status = TrangThaiDon.ChoThanhToan;
             // Hẹn tiếp 30 phút cho khách chuyển tiền.
             don.HoldExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30);
+
+            // Sinh phiếu thu kèm mã QR: khách trả TIỀN THUÊ CỘNG TIỀN CỌC trong một lần chuyển.
+            // Nội dung chuyển khoản chính là mã đơn, để người vận hành đối chiếu sao kê.
+            var soTien = don.RentTotal + don.Deposit;
+            if (!await _db.Payments.AnyAsync(p => p.BookingId == don.Id
+                                              && p.Status == TrangThaiThanhToan.Cho))
+            {
+                _db.Payments.Add(new Payment
+                {
+                    BookingId = don.Id,
+                    Amount = soTien,
+                    TransferCode = don.Code,
+                    QrUrl = _qr.TaoUrl(don.Code, soTien),
+                    Status = TrangThaiThanhToan.Cho
+                });
+            }
 
             await _db.SaveChangesAsync();
             return (await KemTrangThaiGiayTo(new List<Booking> { don })).Value!.Single();

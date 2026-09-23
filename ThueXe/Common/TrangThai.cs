@@ -51,3 +51,73 @@ namespace ThueXe.Common
             { "TRUOC", "SAU", "TRAI", "PHAI", "TAPLO", "ODO" };
     }
 }
+
+namespace ThueXe.Common
+{
+    public static class Vai
+    {
+        public const string NguoiDung = "NGUOI_DUNG";
+        public const string VanHanh = "VAN_HANH";
+    }
+
+    public static class TrangThaiGiayTo
+    {
+        public const string ChuaNop = "CHUA_NOP";
+        public const string ChoDuyet = "CHO_DUYET";
+        public const string Dat = "DAT";
+        public const string TuChoi = "TU_CHOI";
+    }
+
+    public static class TrangThaiThanhToan
+    {
+        public const string Cho = "CHO";
+        public const string DaNhan = "DA_NHAN";
+        public const string HetHan = "HET_HAN";
+    }
+
+    public static class TrangThaiChiTra
+    {
+        public const string Cho = "CHO";
+        public const string DaChi = "DA_CHI";
+        public const string Loi = "LOI";
+    }
+
+    /// Bốn tài khoản của sổ cái. Số dư là tổng bút toán, không lưu thành cột.
+    public static class TaiKhoanSoCai
+    {
+        public const string Khach = "KHACH";
+        public const string ChuXe = "CHU_XE";
+        public const string San = "SAN";
+        public const string ViTreo = "VI_TREO";
+    }
+
+    public static class Chieu
+    {
+        public const string No = "NO";
+        public const string Co = "CO";
+    }
+
+    public static class LoaiChungTu
+    {
+        public const string ThanhToan = "PAYMENT";
+        public const string ChiTra = "PAYOUT";
+        public const string Phi = "CHARGE";
+    }
+
+    public static class LoaiPhi
+    {
+        public const string QuaGio = "QUA_GIO";
+        public const string QuaKm = "QUA_KM";
+        public const string NhienLieu = "NHIEN_LIEU";
+    }
+}
+
+namespace ThueXe.Common
+{
+    public static class ChiTra
+    {
+        /// Sàn chưa thu số tài khoản của khách. Người vận hành phải hỏi trước khi chuyển.
+        /// Đây là lỗ hổng đã biết của lược đồ: bảng booking không có chỗ lưu tài khoản khách.
+        public const string ChuaCoSoTaiKhoan = "CHUA_CO";
+    }
+}

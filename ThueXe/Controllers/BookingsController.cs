@@ -7,11 +7,162 @@ namespace ThueXe.Controllers
     [Authorize]
     public class BookingsController : ControllerBase
     {
+        private const int HoaHongPhanTram = 15;
+
         private readonly ApplicationDbContext _db;
 
         public BookingsController(ApplicationDbContext db) => _db = db;
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        // GET /bookings — đơn của tôi, phía khách
+        [HttpGet]
+        public async Task<ActionResult<List<BookingDto>>> MyBookings([FromQuery] string? status)
+        {
+            var q = _db.Bookings
+                .Include(b => b.Car).ThenInclude(c => c.Photos)
+                .Include(b => b.Renter)
+                .Where(b => b.RenterId == UserId);
+
+            if (!string.IsNullOrWhiteSpace(status))
+                q = q.Where(b => b.Status == status);
+
+            var don = await q.OrderByDescending(b => b.CreatedAt).ToListAsync();
+            return don.Select(b => b.ToDto()).ToList();
+        }
+
+        // POST /bookings/quote — tính giá, KHÔNG tạo đơn
+        [HttpPost("quote")]
+        public async Task<ActionResult<QuoteResult>> Quote(QuoteRequest req)
+        {
+            var xe = await LayXeDatDuoc(req.CarId);
+            var soNgay = KiemNgay(req.StartDate, req.EndDate);
+
+            var ban = await NgayDaBan(req.CarId, req.StartDate, req.EndDate);
+
+            var tienThue = xe.PricePerDay * soNgay;
+            return new QuoteResult(
+                xe.Id, req.StartDate, req.EndDate, soNgay,
+                xe.PricePerDay, tienThue, xe.Deposit,
+                tienThue * HoaHongPhanTram / 100,
+                tienThue + xe.Deposit,
+                ban.Count == 0, ban);
+        }
+
+        // POST /bookings — tạo đơn, giữ lịch, chống hai người đặt trùng ngày
+        [HttpPost]
+        public async Task<ActionResult<BookingDto>> Create(CreateBookingRequest req)
+        {
+            var xe = await LayXeDatDuoc(req.CarId);
+            var soNgay = KiemNgay(req.StartDate, req.EndDate);
+
+            // B4: không thuê xe của chính mình.
+            if (xe.OwnerId == UserId)
+                throw new BizException("CAR_UNAVAILABLE", "Không thể thuê xe của chính bạn");
+
+            // A1: chưa được duyệt giấy tờ thì không đặt được.
+            var giayTo = await _db.IdDocuments
+                .Where(d => d.UserId == UserId)
+                .OrderByDescending(d => d.Id)
+                .Select(d => d.Status)
+                .FirstOrDefaultAsync();
+            if (giayTo != TrangThaiGiayTo.Dat)
+                throw new BizException("KYC_REQUIRED", "Cần nộp và được duyệt CCCD, GPLX trước");
+
+            // A3: GPLX hết hạn thì chặn đặt đơn mới.
+            var hanGplx = await _db.IdDocuments
+                .Where(d => d.UserId == UserId && d.Status == TrangThaiGiayTo.Dat)
+                .OrderByDescending(d => d.Id)
+                .Select(d => d.GplxExpiry)
+                .FirstOrDefaultAsync();
+            if (hanGplx is not null && hanGplx < req.EndDate)
+                throw new BizException("KYC_REQUIRED", "GPLX hết hạn trước ngày trả xe");
+
+            var tienThue = xe.PricePerDay * soNgay;
+            var don = new Booking
+            {
+                Code = MaDonService.Sinh(),
+                CarId = xe.Id,
+                RenterId = UserId,
+                StartDate = req.StartDate,
+                EndDate = req.EndDate,
+                Days = soNgay,
+                PricePerDay = xe.PricePerDay,
+                RentTotal = tienThue,
+                Deposit = xe.Deposit,
+                Commission = tienThue * HoaHongPhanTram / 100,
+                Status = TrangThaiDon.ChoChuXe,
+                // Hẹn chủ xe 30 phút. CHƯA THU TIỀN ở bước này.
+                HoldExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+            };
+
+            await using var giaoDich = await _db.Database.BeginTransactionAsync();
+            try
+            {
+                _db.Bookings.Add(don);
+                await _db.SaveChangesAsync();   // lấy id trước khi giữ lịch
+
+                // Đừng kiểm tra rồi mới ghi — giữa hai bước đó là chỗ đơn thứ hai chen vào.
+                // Dùng thẳng khoá chính (car_id, day) làm trọng tài: ai chèn được thì thắng.
+                // KHOÁ CẢ NGÀY TRẢ: thuê 12→15 là khoá bốn ngày 12, 13, 14, 15. Chỉ khoá tới
+                // 14 thì người khác đặt được ngày 15 trong khi xe còn chưa về.
+                for (var d = req.StartDate; d <= req.EndDate; d = d.AddDays(1))
+                    _db.CarAvailabilities.Add(new CarAvailability
+                    {
+                        CarId = xe.Id,
+                        Day = d,
+                        BookingId = don.Id
+                    });
+
+                await _db.SaveChangesAsync();
+                await giaoDich.CommitAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // Đụng khoá trùng dù chỉ một ngày là cả lệnh đổ. Giao dịch cuộn lại,
+                // đơn cũng biến mất — không để lại dòng mồ côi.
+                await giaoDich.RollbackAsync();
+                throw new BizException("SLOT_TAKEN",
+                    "Những ngày này vừa có người khác đặt mất rồi");
+            }
+
+            await _db.Entry(don).Reference(b => b.Car).LoadAsync();
+            await _db.Entry(don.Car).Collection(c => c.Photos).LoadAsync();
+            await _db.Entry(don).Reference(b => b.Renter).LoadAsync();
+            return don.ToDto();
+        }
+
+        private async Task<Car> LayXeDatDuoc(long carId)
+        {
+            var xe = await _db.Cars.FirstOrDefaultAsync(c => c.Id == carId)
+                     ?? throw new BizException("CAR_UNAVAILABLE", "Không tìm thấy xe");
+
+            // B7: xe bị gỡ hoặc ẩn giữa lúc khách đang đặt.
+            if (xe.Status != TrangThaiXe.DangBan)
+                throw new BizException("CAR_UNAVAILABLE", "Xe này đang không cho thuê");
+
+            return xe;
+        }
+
+        /// B3: ngày quá khứ, hoặc ngày trả không sau ngày nhận → chặn ngay ở tầng dữ liệu vào.
+        private static int KiemNgay(DateOnly batDau, DateOnly ketThuc)
+        {
+            var homNay = DateOnly.FromDateTime(DateTime.UtcNow);
+            if (batDau < homNay)
+                throw new BizException("INVALID_INPUT", "Không đặt được ngày trong quá khứ");
+            if (ketThuc <= batDau)
+                throw new BizException("INVALID_INPUT", "Ngày trả phải sau ngày nhận");
+
+            // Ngày trả KHÔNG tính tiền: thuê 12→15 là ba ngày.
+            return ketThuc.DayNumber - batDau.DayNumber;
+        }
+
+        private async Task<List<DateOnly>> NgayDaBan(long carId, DateOnly tu, DateOnly den) =>
+            await _db.CarAvailabilities
+                .Where(a => a.CarId == carId && a.Day >= tu && a.Day <= den)
+                .Select(a => a.Day)
+                .OrderBy(d => d)
+                .ToListAsync();
 
         // GET /bookings/{id} — chi tiết đơn + thanh toán + biên bản
         [HttpGet("{id:long}")]

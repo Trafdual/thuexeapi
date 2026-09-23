@@ -35,6 +35,33 @@ namespace ThueXe.Helpers
             h.Status, h.SignCreator, h.SignReviewer, h.Objection, h.ReviewedAt, h.CreatedAt,
             h.Photos.Select(p => new HandoverPhotoDto(p.Id, p.Slot, p.Url, p.TakenBy, p.Note)).ToList());
 
+        public static NguoiDungTomTat ToTomTat(this AppUser u) =>
+            new(u.Id, u.FullName, u.Phone, u.Email);
+
+        public static IdDocumentAdminDto ToAdminDto(this IdDocument d, AppUser u) => new(
+            d.Id, u.ToTomTat(), d.CccdNo, d.GplxNo, d.GplxClass, d.GplxExpiry,
+            d.FrontUrl, d.BackUrl, d.SelfieUrl, d.Status, d.RejectReason, d.ReviewedAt);
+
+        public static CarAdminDto ToAdminDto(this Car c, AppUser chuXe, string? cccdNo) => new(
+            c.Id, new ChuXeTomTat(chuXe.Id, chuXe.FullName, chuXe.Phone, cccdNo),
+            c.Plate, c.Brand, c.Model, c.Year, c.Seats, c.Transmission, c.Fuel, c.Odo,
+            c.District, c.PickupAddress, c.PricePerDay, c.MaxKmDay, c.Deposit,
+            c.Description, c.Status, c.RejectReason, c.CreatedAt,
+            c.Photos.OrderBy(p => p.SortOrder)
+                .Select(p => new CarPhotoDto(p.Id, p.Url, p.SortOrder)).ToList(),
+            c.Documents.Select(d => new CarDocumentDto(d.Id, d.Type, d.Url, d.ExpiryDate)).ToList());
+
+        public static PaymentDto ToDto(this Payment p) => new(
+            p.Id, p.BookingId, p.Amount, p.TransferCode, p.QrUrl, p.Status,
+            p.ReceivedAmount, p.ConfirmedAt, p.BankNote);
+
+        public static LedgerEntryDto ToDto(this LedgerEntry e) => new(
+            e.Id, e.Account, e.Direction, e.Amount, e.RefType, e.RefId, e.OccurredAt);
+
+        public static PayoutAdminDto ToAdminDto(this Payout p, string? bookingCode, AppUser payee) => new(
+            p.Id, p.BookingId, bookingCode, p.PayeeType, payee.ToTomTat(),
+            p.BankAccount, p.BankName, p.Amount, p.Status, p.TransferRef, p.PaidAt, p.CreatedAt);
+
         public static PayoutDto ToDto(this Payout p, string? bookingCode) => new(
             p.Id, p.BookingId, bookingCode, p.PayeeType, p.BankAccount, p.BankName,
             p.Amount, p.Status, p.TransferRef, p.PaidAt, p.CreatedAt);

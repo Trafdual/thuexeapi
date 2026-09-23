@@ -11,11 +11,13 @@ namespace ThueXe.Controllers
     {
         private readonly ApplicationDbContext _db;
         private readonly IWebHostEnvironment _env;
+        private readonly QrService _qr;
 
-        public DevSeedController(ApplicationDbContext db, IWebHostEnvironment env)
+        public DevSeedController(ApplicationDbContext db, IWebHostEnvironment env, QrService qr)
         {
             _db = db;
             _env = env;
+            _qr = qr;
         }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -64,6 +66,8 @@ namespace ThueXe.Controllers
             await XoaDuLieuCu();
 
             chuXe.IsOwner = true;
+            // Ở môi trường dev, người chạy seed kiêm luôn vai vận hành để thử các đường /admin/**.
+            chuXe.Role = Vai.VanHanh;
             if (!await _db.OwnerAgreements.AnyAsync(a => a.OwnerId == UserId && a.Version == "1.0"))
             {
                 _db.OwnerAgreements.Add(new OwnerAgreement
@@ -168,6 +172,26 @@ namespace ThueXe.Controllers
                         Day = d,
                         BookingId = b.Id
                     });
+            }
+
+            // Đơn nào đã qua bước nhận đơn thì phải có phiếu thu, không thì màn xác nhận
+            // tiền của quản trị không có gì để bấm.
+            foreach (var b in don.Where(b => b.Status is "CHO_THANH_TOAN" or "DA_XAC_NHAN"
+                                                      or "DANG_THUE" or "CHO_QUYET_TOAN"))
+            {
+                var soTien = b.RentTotal + b.Deposit;
+                _db.Payments.Add(new Payment
+                {
+                    BookingId = b.Id,
+                    Amount = soTien,
+                    TransferCode = b.Code,
+                    QrUrl = _qr.TaoUrl(b.Code, soTien),
+                    Status = b.Status == "CHO_THANH_TOAN"
+                        ? TrangThaiThanhToan.Cho
+                        : TrangThaiThanhToan.DaNhan,
+                    ReceivedAmount = b.Status == "CHO_THANH_TOAN" ? null : soTien,
+                    ConfirmedAt = b.Status == "CHO_THANH_TOAN" ? null : DateTimeOffset.UtcNow
+                });
             }
 
             var daXong = don.Single(b => b.Status == "HOAN_TAT");

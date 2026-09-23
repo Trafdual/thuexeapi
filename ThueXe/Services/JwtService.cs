@@ -15,9 +15,9 @@ namespace ThueXe.Services
             var claims = new List<Claim>
             {
                 new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new("is_owner", user.IsOwner.ToString())
-                // Nếu model AppUser đã có cột IsAdmin, thêm dòng dưới đây; nếu chưa, tạm bỏ qua
-                // new("is_admin", user.IsAdmin.ToString())
+                new("is_owner", user.IsOwner.ToString()),
+                // Đặt đúng ClaimTypes.Role để [Authorize(Roles = "VAN_HANH")] chạy được ngay.
+                new(ClaimTypes.Role, user.Role)
             };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"]!));

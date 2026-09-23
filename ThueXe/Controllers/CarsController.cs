@@ -13,6 +13,63 @@ namespace ThueXe.Controllers
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
+        // GET /cars — tìm xe có lọc, phân trang
+        [HttpGet]
+        public async Task<ActionResult<Paged<CarSearchItemDto>>> Search(
+            [FromQuery] string? district,
+            [FromQuery] DateOnly? from,
+            [FromQuery] DateOnly? to,
+            [FromQuery] int? seats,
+            [FromQuery] string? transmission,
+            [FromQuery] long? maxPrice,
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 20)
+        {
+            page = Math.Max(1, page);
+            size = Math.Clamp(size, 1, 50);
+
+            // Chỉ xe đang bán mới hiện. Xe nháp, chờ duyệt hay bị ẩn thì khách không thấy.
+            var q = _db.Cars
+                .Include(c => c.Photos)
+                .Where(c => c.Status == TrangThaiXe.DangBan);
+
+            if (!string.IsNullOrWhiteSpace(district)) q = q.Where(c => c.District == district);
+            if (seats is > 0) q = q.Where(c => c.Seats >= seats);
+            if (!string.IsNullOrWhiteSpace(transmission)) q = q.Where(c => c.Transmission == transmission);
+            if (maxPrice is > 0) q = q.Where(c => c.PricePerDay <= maxPrice);
+
+            // Lọc theo khoảng ngày: bỏ hết xe đã bận dù chỉ một ngày trong khoảng.
+            if (from is not null && to is not null)
+            {
+                if (to <= from)
+                    throw new BizException("INVALID_INPUT", "Ngày trả phải sau ngày nhận");
+
+                var ban = _db.CarAvailabilities
+                    .Where(a => a.Day >= from && a.Day <= to)
+                    .Select(a => a.CarId);
+                q = q.Where(c => !ban.Contains(c.Id));
+            }
+
+            var tong = await q.CountAsync();
+
+            // Include ảnh rồi mới phân trang để tránh bệnh N+1: một truy vấn, không phải
+            // một truy vấn cho mỗi xe.
+            var xe = await q
+                .OrderBy(c => c.PricePerDay).ThenBy(c => c.Id)
+                .Skip((page - 1) * size)
+                .Take(size)
+                .ToListAsync();
+
+            var items = xe.Select(c => new CarSearchItemDto(
+                c.Id, c.Plate, c.Brand, c.Model, c.Year, c.Seats,
+                c.Transmission, c.Fuel, c.District,
+                c.PricePerDay, c.MaxKmDay, c.Deposit,
+                c.Photos.OrderBy(p => p.SortOrder).Select(p => p.Url).FirstOrDefault())).ToList();
+
+            return new Paged<CarSearchItemDto>(
+                items, page, size, tong, (int)Math.Ceiling(tong / (double)size));
+        }
+
         // GET /cars/{id} — chi tiết xe + ảnh
         [HttpGet("{id:long}")]
         public async Task<ActionResult<CarDto>> Get(long id)
