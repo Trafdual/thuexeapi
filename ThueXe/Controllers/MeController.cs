@@ -31,6 +31,24 @@ namespace ThueXe.Controllers
         }
 
         // POST /me/documents — nộp CCCD + GPLX, chuyển sang chờ duyệt
+        /// PUT /me/bank-account — nơi nhận tiền hoàn cọc.
+        /// Chủ xe đã khai trong bản cam kết; khách thì trước đây không có chỗ nào khai,
+        /// nên lệnh hoàn phải ghi CHUA_CO rồi người vận hành đi hỏi từng người.
+        [HttpPut("bank-account")]
+        public async Task<ActionResult<MeResponse>> CapNhatTaiKhoan(CapNhatTaiKhoanRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.BankAccount) || string.IsNullOrWhiteSpace(req.BankName))
+                throw new BizException("INVALID_INPUT", "Phải có cả số tài khoản và tên ngân hàng");
+
+            var nguoi = await _db.AppUsers.FindAsync(UserId)
+                        ?? throw new BizException("NOT_FOUND", "Không tìm thấy người dùng");
+
+            nguoi.BankAccount = req.BankAccount.Trim();
+            nguoi.BankName = req.BankName.Trim();
+            await _db.SaveChangesAsync();
+            return await Get();
+        }
+
         [HttpPost("documents")]
         public async Task<IActionResult> SubmitDocuments(SubmitDocumentsRequest req)
         {

@@ -165,22 +165,22 @@ namespace ThueXe.Controllers
                 .ToListAsync();
 
         // GET /bookings/{id} — chi tiết đơn + thanh toán + biên bản
-        [HttpGet("{id:long}")]
-        public async Task<ActionResult<BookingDetailDto>> Get(long id)
+        [HttpGet("{khoa}")]
+        public async Task<ActionResult<BookingDetailDto>> Get(string khoa)
         {
-            var don = await LayDonLienQuan(id);
+            var don = await LayDonLienQuan(khoa);
 
             var thanhToan = await _db.Payments
-                .Where(p => p.BookingId == id)
+                .Where(p => p.BookingId == don.Id)
                 .OrderByDescending(p => p.Id)
                 .FirstOrDefaultAsync();
 
             var bienBan = await _db.Handovers
                 .Include(h => h.Photos)
-                .Where(h => h.BookingId == id)
+                .Where(h => h.BookingId == don.Id)
                 .ToListAsync();
 
-            var phi = await _db.Charges.Where(c => c.BookingId == id).ToListAsync();
+            var phi = await _db.Charges.Where(c => c.BookingId == don.Id).ToListAsync();
 
             var giayTo = await _db.IdDocuments
                 .Where(d => d.UserId == don.RenterId)
@@ -199,20 +199,20 @@ namespace ThueXe.Controllers
         }
 
         // POST /bookings/{id}/cancel — nhả lịch, ghi lý do
-        [HttpPost("{id:long}/cancel")]
-        public async Task<ActionResult<BookingDto>> Cancel(long id, CancelBookingRequest req)
+        [HttpPost("{khoa}/cancel")]
+        public async Task<ActionResult<BookingDto>> Cancel(string khoa, CancelBookingRequest req)
         {
             if (string.IsNullOrWhiteSpace(req.Reason))
                 throw new BizException("INVALID_INPUT", "Phải ghi lý do huỷ");
 
-            var don = await LayDonLienQuan(id);
+            var don = await LayDonLienQuan(khoa);
 
             if (TrangThaiDon.DaDong.Contains(don.Status))
                 throw new BizException("WRONG_STATE", "Đơn đã đóng");
 
             // G4: xe đã ra khỏi tay chủ thì phải đi qua đường trả xe, không huỷ được nữa.
             var coBienBanGiao = await _db.Handovers
-                .AnyAsync(h => h.BookingId == id && h.Kind == LoaiBienBan.Giao);
+                .AnyAsync(h => h.BookingId == don.Id && h.Kind == LoaiBienBan.Giao);
             if (coBienBanGiao)
                 throw new BizException("WRONG_STATE", "Đã có biên bản giao, phải đi qua đường trả xe");
 
@@ -220,7 +220,7 @@ namespace ThueXe.Controllers
             don.CancelReason = req.Reason;
             don.HoldExpiresAt = null;
 
-            var dong = await _db.CarAvailabilities.Where(a => a.BookingId == id).ToListAsync();
+            var dong = await _db.CarAvailabilities.Where(a => a.BookingId == don.Id).ToListAsync();
             _db.CarAvailabilities.RemoveRange(dong);
 
             await _db.SaveChangesAsync();
@@ -228,10 +228,10 @@ namespace ThueXe.Controllers
         }
 
         // POST /bookings/{id}/handovers — bên lập nộp biên bản, vào trạng thái CHO_SOI
-        [HttpPost("{id:long}/handovers")]
-        public async Task<ActionResult<HandoverDto>> CreateHandover(long id, CreateHandoverRequest req)
+        [HttpPost("{khoa}/handovers")]
+        public async Task<ActionResult<HandoverDto>> CreateHandover(string khoa, CreateHandoverRequest req)
         {
-            var don = await LayDonLienQuan(id);
+            var don = await LayDonLienQuan(khoa);
             var laChuXe = don.Car.OwnerId == UserId;
 
             if (req.Kind is not (LoaiBienBan.Giao or LoaiBienBan.Tra))
@@ -249,7 +249,7 @@ namespace ThueXe.Controllers
             if (don.Status != canTrangThai)
                 throw new BizException("WRONG_STATE", $"Đơn đang ở {don.Status}");
 
-            if (await _db.Handovers.AnyAsync(h => h.BookingId == id && h.Kind == req.Kind))
+            if (await _db.Handovers.AnyAsync(h => h.BookingId == don.Id && h.Kind == req.Kind))
                 throw new BizException("WRONG_STATE", $"Biên bản {req.Kind} của đơn này đã lập rồi");
 
             // D7: thiếu ảnh hay thiếu chữ ký thì chỉ đúng ô còn thiếu, không xoá cái đã nhập.
@@ -265,7 +265,7 @@ namespace ThueXe.Controllers
             var ben = laChuXe ? Ben.ChuXe : Ben.Khach;
             var bienBan = new Handover
             {
-                BookingId = id,
+                BookingId = don.Id,
                 Kind = req.Kind,
                 CreatedBy = ben,
                 Odo = req.Odo,
@@ -289,16 +289,19 @@ namespace ThueXe.Controllers
             return bienBan.ToDto();
         }
 
-        private async Task<Booking> LayDonLienQuan(long id)
+        private async Task<Booking> LayDonLienQuan(string khoa)
         {
             var don = await _db.Bookings
                 .Include(b => b.Car).ThenInclude(c => c.Photos)
                 .Include(b => b.Renter)
-                .FirstOrDefaultAsync(b => b.Id == id)
-                ?? throw new BizException("WRONG_STATE", "Không tìm thấy đơn");
+                .TheoKhoa(khoa)
+                .FirstOrDefaultAsync();
 
-            if (don.Car.OwnerId != UserId && don.RenterId != UserId)
-                throw new BizException("FORBIDDEN", "Đơn này không liên quan tới bạn");
+            // Đơn không tồn tại và đơn của người khác phải trả về CÙNG MỘT phản hồi.
+            // Phân biệt hai ca là biến API thành máy dò: gọi tuần tự /bookings/1,2,3…
+            // rồi đếm xem ca nào trả FORBIDDEN là biết sàn có bao nhiêu đơn.
+            if (don is null || (don.Car.OwnerId != UserId && don.RenterId != UserId))
+                throw new BizException("NOT_FOUND", "Không tìm thấy đơn");
 
             return don;
         }

@@ -90,4 +90,6 @@ namespace ThueXe.Dtos
     // nên tạm để ở đây; nhóm chốt lại rồi hoặc đưa vào docs/api.md hoặc bỏ màn đó.
     public record NewsItemDto(
         long Id, string Tag, string Title, string Summary, string? ImageUrl, DateOnly? PublishedAt);
+
+    public record CapNhatTaiKhoanRequest(string BankAccount, string BankName);
 }

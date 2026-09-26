@@ -33,7 +33,9 @@ namespace ThueXe.Dtos
         /// Khớp đủ tiền hay không. Thiếu thì Booking đứng nguyên, web phải tô cảnh báo.
         bool KhopSoTien, long LechSoTien,
         /// Chuyển thừa thì sinh thêm lệnh hoàn phần thừa.
-        PayoutDto? RefundPayout);
+        PayoutDto? RefundPayout,
+        /// false = người vận hành không dán nội dung chuyển khoản, máy không đối chiếu được.
+        bool DaDoiChieuNoiDung = false);
 
     // ── Quyết toán ────────────────────────────────────────────────────
     public record ChargeRequest(string Type, long Amount, string? Note);
@@ -61,4 +63,34 @@ namespace ThueXe.Dtos
     public record LedgerResult(
         long BookingId, List<LedgerEntryDto> Entries,
         long TongNo, long TongCo, bool CanBang);
+
+    /// Thân thông báo tiền về. Đặt tên trường theo cái mà SePay và Casso gửi ra,
+    /// để sau này cắm dịch vụ thật vào là chạy, không phải sửa.
+    public record BankWebhookRequest(
+        long Amount,
+        string? Content,
+        string TransferRef,
+        DateTimeOffset? OccurredAt);
+
+    public record BankWebhookResult(
+        string TinhHuong,
+        long? PaymentId,
+        long? BookingId,
+        string? BookingStatus,
+        string? BookingCode,
+        string Loi);
+
+    /// Kết quả đối soát cuối ngày. Lệch dương là có tiền vào chưa ghi; lệch âm nguy hiểm
+    /// hơn: sổ nói còn tiền mà tài khoản không có.
+    public record DoiSoatResult(
+        DateTimeOffset TinhDenLuc,
+        long TongDaThu,
+        long TongDaChi,
+        long SoDuKyVong,
+        long? SoDuNganHang,
+        long? Lech,
+        long ViTreoTheoSoCai,
+        long ConPhaiChi,
+        bool Dat,
+        string Loi);
 }

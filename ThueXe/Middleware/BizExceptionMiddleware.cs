@@ -21,16 +21,16 @@ namespace ThueXe.Middleware
             }
             catch (BizException ex)
             {
-                ctx.Response.StatusCode = 422;
+                ctx.Response.StatusCode = 200;   // lỗi nằm trong thân JSON: status/code/message
                 ctx.Response.ContentType = "application/json";
-                await ctx.Response.WriteAsJsonAsync(new { code = ex.Code, message = ex.Message });
+                await ctx.Response.WriteAsJsonAsync(ApiResponse.Fail(422, ex.Code, ex.Message));
             }
             catch (Exception ex)
             {
                 _log.LogError(ex, "Lỗi không mong đợi tại {Path}", ctx.Request.Path);
-                ctx.Response.StatusCode = 500;
+                ctx.Response.StatusCode = 200;
                 ctx.Response.ContentType = "application/json";
-                await ctx.Response.WriteAsJsonAsync(new { code = "INTERNAL_ERROR", message = "Có lỗi xảy ra" });
+                await ctx.Response.WriteAsJsonAsync(ApiResponse.Fail(500, "INTERNAL_ERROR", "Có lỗi xảy ra"));
             }
         }
     }

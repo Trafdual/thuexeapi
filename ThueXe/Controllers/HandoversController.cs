@@ -104,7 +104,7 @@ namespace ThueXe.Controllers
 
             var laChuXe = bienBan.Booking.Car.OwnerId == UserId;
             if (!laChuXe && bienBan.Booking.RenterId != UserId)
-                throw new BizException("FORBIDDEN", "Biên bản này không liên quan tới bạn");
+                throw new BizException("NOT_FOUND", "Không tìm thấy biên bản");
 
             return (bienBan, laChuXe);
         }

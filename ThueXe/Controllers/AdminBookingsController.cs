@@ -14,14 +14,15 @@ namespace ThueXe.Controllers
         public AdminBookingsController(ApplicationDbContext db) => _db = db;
 
         // POST /admin/bookings/{id}/settle — chốt phí, ghi sổ cái, sinh 2 lệnh chi
-        [HttpPost("{id:long}/settle")]
-        public async Task<ActionResult<SettleResult>> Settle(long id, SettleRequest req)
+        [HttpPost("{khoa}/settle")]
+        public async Task<ActionResult<SettleResult>> Settle(string khoa, SettleRequest req)
         {
             var don = await _db.Bookings
                 .Include(b => b.Car).ThenInclude(c => c.Photos)
                 .Include(b => b.Renter)
-                .FirstOrDefaultAsync(b => b.Id == id)
-                ?? throw new BizException("WRONG_STATE", "Không tìm thấy đơn");
+                .TheoKhoa(khoa)
+                .FirstOrDefaultAsync()
+                ?? throw new BizException("NOT_FOUND", "Không tìm thấy đơn");
 
             if (don.Status != TrangThaiDon.ChoQuyetToan)
                 throw new BizException("WRONG_STATE", $"Đơn đang ở {don.Status}, chưa chốt được");
@@ -73,6 +74,7 @@ namespace ThueXe.Controllers
             }
 
             // Cọc là tiền bảo đảm, không phải tiền phạt — phần còn dư luôn trả lại khách.
+            var khachThue = await _db.AppUsers.FindAsync(don.RenterId);
             var hoanKhach = new Payout
             {
                 BookingId = don.Id,
@@ -84,8 +86,8 @@ namespace ThueXe.Controllers
                 Status = khachHoan > 0 ? TrangThaiChiTra.Cho : TrangThaiChiTra.DaChi,
                 TransferRef = khachHoan > 0 ? null : "KHONG_CAN_CHUYEN",
                 PaidAt = khachHoan > 0 ? null : DateTimeOffset.UtcNow,
-                BankAccount = ChiTra.ChuaCoSoTaiKhoan,
-                BankName = ChiTra.ChuaCoSoTaiKhoan
+                BankAccount = khachThue?.BankAccount ?? ChiTra.ChuaCoSoTaiKhoan,
+                BankName = khachThue?.BankName ?? ChiTra.ChuaCoSoTaiKhoan
             };
 
             _db.Payouts.Add(chiChuXe);

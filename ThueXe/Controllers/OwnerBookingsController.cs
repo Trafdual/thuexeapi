@@ -35,10 +35,10 @@ namespace ThueXe.Controllers
         }
 
         // POST /owner/bookings/{id}/confirm — chủ xe nhận đơn
-        [HttpPost("{id:long}/confirm")]
-        public async Task<ActionResult<BookingDto>> Confirm(long id)
+        [HttpPost("{khoa}/confirm")]
+        public async Task<ActionResult<BookingDto>> Confirm(string khoa)
         {
-            var don = await LayDonCuaXeToi(id);
+            var don = await LayDonCuaXeToi(khoa);
 
             // Mọi phương thức đổi trạng thái mở đầu bằng một câu kiểm tra trạng thái hiện tại.
             if (don.Status != TrangThaiDon.ChoChuXe)
@@ -69,13 +69,13 @@ namespace ThueXe.Controllers
         }
 
         // POST /owner/bookings/{id}/reject — chủ xe từ chối đơn
-        [HttpPost("{id:long}/reject")]
-        public async Task<ActionResult<BookingDto>> Reject(long id, RejectBookingRequest req)
+        [HttpPost("{khoa}/reject")]
+        public async Task<ActionResult<BookingDto>> Reject(string khoa, RejectBookingRequest req)
         {
             if (string.IsNullOrWhiteSpace(req.Reason))
                 throw new BizException("INVALID_INPUT", "Phải ghi lý do từ chối");
 
-            var don = await LayDonCuaXeToi(id);
+            var don = await LayDonCuaXeToi(khoa);
             if (don.Status != TrangThaiDon.ChoChuXe)
                 throw new BizException("WRONG_STATE", $"Đơn đang ở {don.Status}, không từ chối được");
 
@@ -96,13 +96,14 @@ namespace ThueXe.Controllers
             _db.CarAvailabilities.RemoveRange(dong);
         }
 
-        private async Task<Booking> LayDonCuaXeToi(long id)
+        private async Task<Booking> LayDonCuaXeToi(string khoa)
         {
             var don = await _db.Bookings
                 .Include(b => b.Car).ThenInclude(c => c.Photos)
                 .Include(b => b.Renter)
-                .FirstOrDefaultAsync(b => b.Id == id)
-                ?? throw new BizException("WRONG_STATE", "Không tìm thấy đơn");
+                .TheoKhoa(khoa)
+                .FirstOrDefaultAsync()
+                ?? throw new BizException("NOT_FOUND", "Không tìm thấy đơn");
 
             if (don.Car.OwnerId != UserId)
                 throw new BizException("FORBIDDEN", "Đơn này không phải của xe bạn");

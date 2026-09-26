@@ -8,8 +8,13 @@ namespace ThueXe.Controllers
     public class AdminPaymentsController : ControllerBase
     {
         private readonly ApplicationDbContext _db;
+        private readonly ThanhToanService _thanhToan;
 
-        public AdminPaymentsController(ApplicationDbContext db) => _db = db;
+        public AdminPaymentsController(ApplicationDbContext db, ThanhToanService thanhToan)
+        {
+            _db = db;
+            _thanhToan = thanhToan;
+        }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -26,73 +31,22 @@ namespace ThueXe.Controllers
             if (thu.Status == TrangThaiThanhToan.DaNhan)
                 throw new BizException("WRONG_STATE", "Phiếu thu này đã xác nhận rồi");
 
-            var don = thu.Booking;
-            var lech = req.ReceivedAmount - thu.Amount;
+            // Lỗi tốn tiền nhất ở đường bấm tay là CHỌN NHẦM PHIẾU THU: người vận hành
+            // nhìn một dòng sao kê rồi bấm nhầm đơn khác. Dán nội dung chuyển khoản vào
+            // thì máy đối chiếu hộ — cùng luật dò mã với webhook.
+            var maTrongNoiDung = MaDon.TimTrong(req.BankNote);
+            if (maTrongNoiDung is not null && maTrongNoiDung != thu.TransferCode)
+                throw new BizException("MA_DON_KHONG_KHOP",
+                    $"Nội dung chuyển khoản mang mã {maTrongNoiDung}, " +
+                    $"nhưng phiếu thu này là {thu.TransferCode}. Kiểm lại xem có chọn nhầm đơn không.");
 
-            thu.ReceivedAmount = req.ReceivedAmount;
-            thu.BankNote = req.BankNote;
-
-            // C2: chuyển THIẾU thì KHÔNG tự xác nhận. Ghi lại số thực nhận để người vận hành
-            // gọi khách chuyển bù; đơn đứng nguyên ở CHO_THANH_TOAN.
-            if (lech < 0)
-            {
-                await _db.SaveChangesAsync();
-                return new ConfirmPaymentResult(
-                    thu.ToDto(), don.ToDto(), KhopSoTien: false, LechSoTien: lech, RefundPayout: null);
-            }
-
-            if (don.Status != TrangThaiDon.ChoThanhToan)
-                throw new BizException("WRONG_STATE", $"Đơn đang ở {don.Status}");
-
-            thu.Status = TrangThaiThanhToan.DaNhan;
-            thu.ConfirmedBy = UserId;
-            thu.ConfirmedAt = DateTimeOffset.UtcNow;
-
-            // Tiền vào ví treo: bút toán kép, chỉ ghi thêm.
-            GhiSo(don.Id, TaiKhoanSoCai.Khach, Chieu.No, thu.Amount, LoaiChungTu.ThanhToan, thu.Id);
-            GhiSo(don.Id, TaiKhoanSoCai.ViTreo, Chieu.Co, thu.Amount, LoaiChungTu.ThanhToan, thu.Id);
-
-            // Đơn sang đã xác nhận: từ đây địa chỉ giao xe và số điện thoại mở cho hai bên.
-            don.Status = TrangThaiDon.DaXacNhan;
-            don.HoldExpiresAt = null;
-
-            // C3: chuyển THỪA thì vẫn xác nhận đơn, sinh thêm lệnh hoàn phần thừa cho khách.
-            Payout? hoanThua = null;
-            if (lech > 0)
-            {
-                hoanThua = new Payout
-                {
-                    BookingId = don.Id,
-                    PayeeType = Ben.Khach,
-                    PayeeId = don.RenterId,
-                    BankAccount = ChiTra.ChuaCoSoTaiKhoan,
-                    BankName = ChiTra.ChuaCoSoTaiKhoan,
-                    Amount = lech,
-                    Status = TrangThaiChiTra.Cho
-                };
-                _db.Payouts.Add(hoanThua);
-            }
-
-            await _db.SaveChangesAsync();
+            var kq = await _thanhToan.GhiTienVao(thu, req.ReceivedAmount, req.BankNote, UserId);
 
             return new ConfirmPaymentResult(
-                thu.ToDto(), don.ToDto(),
-                KhopSoTien: lech == 0, LechSoTien: lech,
-                RefundPayout: hoanThua?.ToDto(don.Code));
-        }
-
-        private void GhiSo(long donId, string taiKhoan, string chieu, long soTien,
-                           string loaiChungTu, long chungTuId)
-        {
-            _db.LedgerEntries.Add(new LedgerEntry
-            {
-                BookingId = donId,
-                Account = taiKhoan,
-                Direction = chieu,
-                Amount = soTien,
-                RefType = loaiChungTu,
-                RefId = chungTuId
-            });
+                kq.Thu.ToDto(), kq.Don.ToDto(),
+                KhopSoTien: kq.KhopSoTien, LechSoTien: kq.LechSoTien,
+                RefundPayout: kq.HoanThua?.ToDto(kq.Don.Code),
+                DaDoiChieuNoiDung: maTrongNoiDung is not null);
         }
     }
 }

@@ -54,6 +54,20 @@ namespace ThueXe.Controllers
             new("KNM8W7Z4", 5, "Đỗ Quang Huy", "0956789012", -9, 4, "HOAN_TAT"),
         };
 
+        /// Tra số tiền của một phiếu thu theo mã đơn. Chỉ để script giả lập ngân hàng
+        /// biết phải bắn bao nhiêu — coi như khách quét mã QR, không sửa được số tiền.
+        [HttpGet("/dev/so-tien-phieu-thu/{ma}")]
+        [AllowAnonymous]
+        public async Task<ActionResult<long>> SoTienPhieuThu(string ma)
+        {
+            if (!_env.IsDevelopment())
+                throw new BizException("FORBIDDEN", "Chỉ chạy được ở môi trường dev");
+
+            var thu = await _db.Payments.FirstOrDefaultAsync(p => p.TransferCode == ma)
+                      ?? throw new BizException("NOT_FOUND", $"Không có phiếu thu mang mã {ma}");
+            return thu.Amount;
+        }
+
         [HttpPost]
         public async Task<IActionResult> Seed()
         {
@@ -104,7 +118,7 @@ namespace ThueXe.Controllers
                 var c = new Car
                 {
                     OwnerId = UserId,
-                    Plate = m.Bien,
+                    Plate = BienTheoNguoi(m.Bien, i),
                     Brand = m.Hang,
                     Model = m.Dong,
                     Year = m.Nam,
@@ -142,7 +156,7 @@ namespace ThueXe.Controllers
 
                 var b = new Booking
                 {
-                    Code = m.Ma,
+                    Code = MaDonTheoNguoi(Array.IndexOf(DanhSachDon, m)),
                     CarId = c.Id,
                     RenterId = khach.Id,
                     StartDate = homNay.AddDays(m.CachHomNay),
@@ -219,6 +233,38 @@ namespace ThueXe.Controllers
                 Status = "CHO"
             });
 
+            // Biên bản. Không có thì màn soi ảnh của app chủ xe không có gì để mở,
+            // mà đơn DANG_THUE hay HOAN_TAT lại vô lý vì đã qua bước giao xe.
+            var soBienBan = 0;
+
+            // Đơn đang thuê: xe đã giao xong, khách vừa nộp biên bản TRA và đang chờ chủ xe soi.
+            // Đây đúng là trạng thái màn "Soi biên bản trả xe" cần để thử.
+            soBienBan += ThemBienBan(dangChay, LoaiBienBan.Giao, Ben.ChuXe, TrangThaiBienBan.DaKy,
+                odo: 52_000, nhienLieu: 8, ghiChu: "Xe sạch, có vết xước nhẹ cửa sau bên trái");
+            soBienBan += ThemBienBan(dangChay, LoaiBienBan.Tra, Ben.Khach, TrangThaiBienBan.ChoSoi,
+                odo: 52_340, nhienLieu: 5, ghiChu: "Trả đúng giờ, xăng còn 5 vạch");
+
+            // Đơn đã xong: đủ hai biên bản đã ký, kèm phí phát sinh để màn quyết toán có số.
+            soBienBan += ThemBienBan(daXong, LoaiBienBan.Giao, Ben.ChuXe, TrangThaiBienBan.DaKy,
+                odo: 88_000, nhienLieu: 8, ghiChu: "Giao đủ đồ nghề, lốp dự phòng còn mới");
+            soBienBan += ThemBienBan(daXong, LoaiBienBan.Tra, Ben.Khach, TrangThaiBienBan.DaKy,
+                odo: 89_620, nhienLieu: 6, ghiChu: "Trả muộn 2 giờ, đã báo trước");
+
+            _db.Charges.Add(new Charge
+            {
+                BookingId = daXong.Id,
+                Type = LoaiPhi.QuaKm,
+                Amount = 420_000,
+                Note = "Vượt 84 km so với hạn mức"
+            });
+            _db.Charges.Add(new Charge
+            {
+                BookingId = daXong.Id,
+                Type = LoaiPhi.NhienLieu,
+                Amount = 240_000,
+                Note = "Thiếu 2 vạch xăng"
+            });
+
             await _db.SaveChangesAsync();
 
             return Ok(new
@@ -226,8 +272,63 @@ namespace ThueXe.Controllers
                 message = "Đã dựng dữ liệu mẫu",
                 xe = xe.Count,
                 don = don.Count,
+                bienBan = soBienBan,
                 lenhChi = 2
             });
+        }
+
+        /// Mã đơn cũng có ràng buộc duy nhất toàn bảng như biển số. Sinh theo người gọi
+        /// và thứ tự đơn để mỗi người một dải riêng, mà seed lại vẫn ra mã cũ.
+        /// Dùng đúng bảng chữ của MaDonService: bỏ 0 O 1 I L cho khỏi nhầm khi gõ chuyển khoản.
+        private string MaDonTheoNguoi(int thuTu)
+        {
+            const string bangChu = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+            var so = UserId * 100 + thuTu;
+            var sb = new System.Text.StringBuilder();
+            for (var i = 0; i < 6; i++)
+            {
+                sb.Insert(0, bangChu[(int)(so % bangChu.Length)]);
+                so /= bangChu.Length;
+            }
+            return "KNM" + sb;
+        }
+
+        /// Dựng một biên bản đủ sáu khung ảnh. Bên lập ký sẵn; bên soi chỉ ký khi đã DA_KY,
+        /// còn CHO_SOI thì để trống chữ ký người soi đúng như lúc chờ duyệt thật.
+        private int ThemBienBan(Booking b, string loai, string benLap, string trangThai,
+            int odo, int nhienLieu, string ghiChu)
+        {
+            var bb = new Handover
+            {
+                BookingId = b.Id,
+                Kind = loai,
+                CreatedBy = benLap,
+                Odo = odo,
+                FuelLevel = nhienLieu,
+                Note = ghiChu,
+                Status = trangThai,
+                SignCreator = "/files/mau/chu-ky.jpg",
+                SignReviewer = trangThai == TrangThaiBienBan.DaKy ? "/files/mau/chu-ky.jpg" : null,
+                ReviewedAt = trangThai == TrangThaiBienBan.DaKy ? DateTimeOffset.UtcNow : null
+            };
+            foreach (var khung in KhungAnh.BatBuoc)
+                bb.Photos.Add(new HandoverPhoto
+                {
+                    Slot = khung,
+                    Url = $"/files/mau/bien-ban-{khung.ToLowerInvariant()}.jpg",
+                    TakenBy = benLap
+                });
+            _db.Handovers.Add(bb);
+            return 1;
+        }
+
+        /// Biển số có ràng buộc duy nhất toàn bảng, trong khi seed chỉ xoá xe của người gọi.
+        /// Nhiều người cùng seed trên một backend dùng chung thì biển mẫu sẽ đụng nhau,
+        /// nên gắn mã người dùng vào biển để mỗi người một dải riêng.
+        private string BienTheoNguoi(string bienMau, int thuTu)
+        {
+            var dauSo = bienMau.Split('-')[0];           // giữ "51A", "51F"...
+            return $"{dauSo}-{UserId % 1000:000}.{thuTu + 1:00}";
         }
 
         private async Task XoaDuLieuCu()
@@ -264,7 +365,10 @@ namespace ThueXe.Controllers
                 Phone = sdt,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("test"),
                 FullName = ten,
-                Status = "HOAT_DONG"
+                Status = "HOAT_DONG",
+                // Có sẵn nơi nhận tiền hoàn, để luồng quyết toán không vướng CHUA_CO.
+                BankAccount = "0" + sdt[1..],
+                BankName = "Vietcombank"
             };
             _db.AppUsers.Add(khach);
             await _db.SaveChangesAsync();
