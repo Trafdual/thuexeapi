@@ -102,6 +102,8 @@ namespace ThueXe.Common
         public const string ThanhToan = "PAYMENT";
         public const string ChiTra = "PAYOUT";
         public const string Phi = "CHARGE";
+        /// Khách trả khoản nợ phí vượt cọc; chứng từ là chính đơn.
+        public const string NoPhatSinh = "DEBT";
     }
 
     public static class LoaiPhi

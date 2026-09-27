@@ -1,0 +1,55 @@
+@startuml
+' Tuần tự quyết toán và chi trả — mục 5.4 báo cáo
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+title Luồng 3 — quyết toán và chi trả
+
+actor "Người vận hành" as VH
+participant "Web" as WEB
+participant "API" as API
+participant "PhiPhatSinhService" as SVC
+database "CSDL" as DB
+
+VH -> WEB : mở màn quyết toán
+WEB -> API : GET /bookings/{id}
+API -> DB : đọc booking + biên bản GIAO + biên bản TRA
+API -> SVC : Tinh(odo giao/tra, nhiên liệu, số giờ trả muộn)
+SVC --> API : quá km · quá giờ · thiếu nhiên liệu · phí giao xe
+
+note right of SVC #FFF2CC
+  **Hàm thuần static, không chạm CSDL.**
+  Nhờ vậy 17 ca unit test chạy được mà
+  không cần dựng cơ sở dữ liệu.
+  Trễ quá 5 giờ tính tròn một ngày ·
+  quá km 5.000đ/km · thiếu nhiên liệu
+  120.000đ mỗi vạch.
+end note
+
+API --> WEB : đơn + hai biên bản + phí đề xuất
+VH -> WEB : xem phí, sửa nếu cần, bấm Quyết toán
+WEB -> API : POST /admin/bookings/{id}/settle
+API -> DB : một giao dịch:\n6 bút toán ledger_entry (3 cặp NỢ/CÓ)\n+ 2 dòng payout · đơn sang CHO_CHI_TRA
+
+loop từng lệnh chi — chủ xe và khách
+  VH -> VH : chuyển khoản thật
+  note right of VH #FFCCCC
+    Ngoài hệ thống
+  end note
+  VH -> WEB : bấm Đã chi, dán mã giao dịch
+  WEB -> API : POST /admin/payouts/{id}/paid
+  API -> DB : payout DA_CHI, ghi mã giao dịch sao kê
+end
+
+alt còn một lệnh chi đang chờ
+  API --> WEB : đơn vẫn CHO_CHI_TRA
+else cả hai lệnh đã chi
+  API -> DB : đơn sang HOAN_TAT
+  API --> WEB : 200 · đóng đơn, tổng NỢ = tổng CÓ
+end
+
+note over VH, DB
+  Sổ cái ghi kép, chỉ thêm không sửa. Số dư ví treo là **tổng của sổ cái**,
+  không phải một cột — lệch một đồng thì dừng lại tra, không bỏ qua.
+end note
+@enduml

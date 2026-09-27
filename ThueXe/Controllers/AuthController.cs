@@ -85,7 +85,7 @@ namespace ThueXe.Controllers
                 .FirstOrDefaultAsync();
 
             var profile = new MeResponse(user.Id, user.Phone, user.FullName, user.Email,
-                user.IsOwner, user.Status, doc?.Status ?? "CHUA_NOP");
+                user.IsOwner, user.Status, doc?.Status ?? "CHUA_NOP", user.BankAccount, user.BankName);
 
             return new AuthResponse(_jwt.Issue(user), profile);
         }

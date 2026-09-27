@@ -6,7 +6,8 @@ namespace ThueXe.Dtos
 
     public record MeResponse(
         long Id, string Phone, string FullName, string? Email,
-        bool IsOwner, string Status, string DocumentStatus);
+        bool IsOwner, string Status, string DocumentStatus,
+        string? BankAccount = null, string? BankName = null);
 
     public record AuthResponse(string Token, MeResponse Profile);
 

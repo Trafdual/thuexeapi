@@ -30,7 +30,7 @@
 
         public int MaxKmDay { get; set; } = 300;
 
-        public long Deposit { get; set; } = 3_000_000;
+        public long Deposit { get; set; } = 15_000_000;
 
         public string? Description { get; set; }
 

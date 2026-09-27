@@ -11,7 +11,13 @@ namespace ThueXe.Controllers
 
         private readonly ApplicationDbContext _db;
 
-        public OwnerCarsController(ApplicationDbContext db) => _db = db;
+        private readonly FileStorageService _files;
+
+        public OwnerCarsController(ApplicationDbContext db, FileStorageService files)
+        {
+            _db = db;
+            _files = files;
+        }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -61,7 +67,7 @@ namespace ThueXe.Controllers
                 PickupAddress = req.PickupAddress,
                 PricePerDay = req.PricePerDay,
                 MaxKmDay = req.MaxKmDay == 0 ? 300 : req.MaxKmDay,
-                Deposit = req.Deposit == 0 ? 3_000_000 : req.Deposit,
+                Deposit = req.Deposit == 0 ? 15_000_000 : req.Deposit,
                 Description = req.Description,
                 Status = TrangThaiXe.ChoDuyet,
                 CreatedAt = DateTimeOffset.UtcNow
@@ -154,7 +160,8 @@ namespace ThueXe.Controllers
                 xe.Photos.Add(new CarPhoto { Url = anh[i], SortOrder = i });
 
             foreach (var g in req.Documents ?? new List<CarDocumentRequest>())
-                xe.Documents.Add(new CarDocument { Type = g.Type, Url = g.Url, ExpiryDate = g.ExpiryDate });
+                // Đăng ký, đăng kiểm, giấy uỷ quyền chuyển sang kho riêng, không phát công khai ở /files.
+                xe.Documents.Add(new CarDocument { Type = g.Type, Url = _files.ChuyenSangRiengTu(g.Url), ExpiryDate = g.ExpiryDate });
         }
 
         private async Task<Car> LayXeCuaToi(long id)

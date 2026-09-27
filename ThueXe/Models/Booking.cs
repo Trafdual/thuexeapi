@@ -32,6 +32,10 @@ namespace ThueXe.Models
 
         public string? CancelReason { get; set; }
 
+        /// Phần phí phát sinh vượt tiền cọc khi chốt đơn. Khách nợ khoản này cho tới DebtPaidAt.
+        public long DebtAmount { get; set; }
+        public DateTimeOffset? DebtPaidAt { get; set; }
+
         public DateTimeOffset CreatedAt { get; set; }
             = DateTimeOffset.UtcNow;
 

@@ -9,7 +9,13 @@ namespace ThueXe.Controllers
     {
         private readonly ApplicationDbContext _db;
 
-        public AdminDocumentsController(ApplicationDbContext db) => _db = db;
+        private readonly FileStorageService _files;
+
+        public AdminDocumentsController(ApplicationDbContext db, FileStorageService files)
+        {
+            _db = db;
+            _files = files;
+        }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -23,6 +29,27 @@ namespace ThueXe.Controllers
 
             var ds = await q.OrderBy(d => d.Id).ToListAsync();
             return ds.Select(d => d.ToAdminDto(d.User)).ToList();
+        }
+
+        // GET /admin/documents/{id}/image/{front|back|selfie} — ảnh giấy tờ, chỉ người vận hành đã đăng nhập.
+        [HttpGet("{id:long}/image/{mat}")]
+        public async Task<IActionResult> Anh(long id, string mat)
+        {
+            var d = await _db.IdDocuments.FindAsync(id)
+                    ?? throw new BizException("NOT_FOUND", "Không tìm thấy giấy tờ");
+            var url = mat switch { "front" => d.FrontUrl, "back" => d.BackUrl, "selfie" => d.SelfieUrl, _ => null };
+            var duongDan = _files.DuongDanGiayTo(url)
+                           ?? throw new BizException("NOT_FOUND", "Không có ảnh này");
+
+            var loai = Path.GetExtension(duongDan).ToLowerInvariant() switch
+            {
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                _ => "image/jpeg"
+            };
+            // Không cho trình duyệt hay proxy giữ lại ảnh giấy tờ.
+            Response.Headers.CacheControl = "no-store, private";
+            return PhysicalFile(duongDan, loai);
         }
 
         // POST /admin/documents/{id}/review — { approved, reason }

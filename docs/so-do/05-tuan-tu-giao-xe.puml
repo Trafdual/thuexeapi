@@ -1,0 +1,63 @@
+@startuml
+' Tuần tự giao xe, biên bản hai chiều — mục 5.4 báo cáo
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+title Luồng 2 — giao xe, biên bản hai chiều
+
+actor "Chủ xe" as CX
+participant "App" as APP
+participant "API" as API
+database "CSDL" as DB
+actor "Khách" as KH
+
+loop 6 khung ảnh bắt buộc
+  CX -> APP : chụp ảnh một khung
+  APP -> API : POST /files
+  API --> APP : url ảnh
+end
+
+CX -> APP : ký tay trên màn hình
+APP -> API : POST /files — chữ ký kết xuất PNG
+APP -> API : POST /bookings/{id}/handovers
+
+alt đủ 6 khung và có chữ ký
+  API -> DB : insert handover + handover_photo
+  API --> APP : 201 · biên bản CHO_SOI
+  note over API, DB #FFF2CC
+    **Đơn vẫn DA_XAC_NHAN.**
+    Biên bản chưa được soi thì trạng thái đơn không đổi —
+    đây là chỗ hay vẽ sai.
+  end note
+else thiếu khung hoặc thiếu chữ ký
+  API --> APP : 422 HANDOVER_INCOMPLETE\nkèm tên khung còn thiếu
+end
+
+CX -> KH : đưa máy cho khách soi
+KH -> APP : xem hết 6 ảnh
+note right of APP
+  Nút ký chỉ bật sau khi
+  đã xem đủ 6 khung
+end note
+
+opt khách thấy vết chủ xe chưa ghi
+  KH -> APP : chụp bổ sung
+  APP -> API : POST /handovers/{id}/photos
+end
+
+KH -> APP : ký, hoặc phản đối
+APP -> API : POST /handovers/{id}/review
+
+alt khách ký
+  API -> DB : handover DA_KY · **booking DANG_THUE**
+  API --> APP : 200 · xe đã giao
+else khách phản đối
+  API -> DB : handover PHAN_DOI · booking DA_HUY\nxoá dải ngày đã giữ
+  API --> APP : 200 · đơn đã huỷ, lịch được nhả
+end
+
+note over CX, KH
+  **Bên tạo biên bản không được tự soi biên bản của mình.**
+  Biên bản TRA đi ngược lại: khách lập, chủ xe soi.
+end note
+@enduml

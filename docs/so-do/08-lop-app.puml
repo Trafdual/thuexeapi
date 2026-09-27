@@ -1,0 +1,117 @@
+@startuml
+' Sơ đồ lớp tầng dữ liệu app Android — mục 5.7 báo cáo
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam linetype ortho
+title Tầng dữ liệu app Android — phụ thuộc chỉ đi một chiều
+
+package "Màn hình Compose" #DAE8FC {
+  class OwnerScreens {
+    OwnerHomeScreen
+    CarListScreen · CarDetailScreen
+    BookingDetailScreen
+    HandoverGiaoScreen
+    ProfileScreen · NewsScreen
+    --
+    chỉ đọc StateFlow và gọi hàm ViewModel
+  }
+}
+
+package "ViewModel" #DAE8FC {
+  class OwnerViewModel {
+    + uiState : StateFlow<UiState>
+    --
+    + tai()
+    + xacNhan(id) · tuChoi(id, lyDo)
+  }
+  class UiState <<data class>> {
+    loading : Boolean
+    duLieu : T?
+    errorCode : ErrorCode?
+    errorMessage : String?
+    --
+    một đối tượng trạng thái,
+    không phải năm biến rời
+  }
+}
+
+package "Repository" #D5E8D4 {
+  class Repositories {
+    AuthRepo · OwnerRepo
+    BookingRepo · HandoverRepo
+    FileRepo · NewsRepo
+    --
+    gói mọi lời gọi mạng vào ApiResult<T>
+    chặn hết ngoại lệ, quy về mã lỗi
+  }
+  class "ApiResult<T>" as AR <<sealed>> {
+    Ok(data : T)
+    Err(code : ErrorCode, message : String)
+  }
+}
+
+package "Mạng" #FFE6CC {
+  interface RetrofitApis {
+    AuthApi · OwnerApi · BookingApi
+    HandoverApi · FileApi · NewsApi
+    --
+    khai đúng đường dẫn trong docs/api.md
+  }
+  class OkHttpClient {
+    chuỗi bộ chặn + bộ chuyển đổi
+  }
+  class TokenStore {
+    giữ JWT trong DataStore
+    đọc lại khi mở app
+  }
+  class AuthInterceptor {
+    gắn Authorization: Bearer
+    vào mọi yêu cầu
+  }
+  class DemoInterceptor {
+    backend trả 404 hoặc mất mạng
+    → quay sang dữ liệu demo
+  }
+  class GsonAdapters {
+    LocalDate : ngày trần
+    OffsetDateTime : ISO có múi giờ
+  }
+}
+
+package "Tiêm phụ thuộc" #E1D5E7 {
+  class NetworkModule <<Hilt Module>> {
+    @Provides OkHttpClient
+    @Provides Retrofit + Gson
+    @Singleton mọi Repository
+  }
+}
+
+OwnerScreens --> OwnerViewModel : đọc StateFlow\ngọi hàm
+OwnerViewModel *-- UiState
+OwnerViewModel --> Repositories : gọi hàm treo (suspend)
+Repositories --> RetrofitApis : gọi đường dẫn
+Repositories ..> AR : <<dùng>>
+RetrofitApis --> OkHttpClient : thực thi yêu cầu
+OkHttpClient *-- AuthInterceptor
+OkHttpClient *-- DemoInterceptor
+OkHttpClient *-- GsonAdapters
+OkHttpClient *-- TokenStore
+NetworkModule ..> OwnerViewModel : <<tiêm>>
+NetworkModule ..> Repositories : <<tiêm>>
+NetworkModule ..> OkHttpClient : <<tạo>>
+
+note bottom of AR
+  **Giao diện bắt theo code, không bắt theo câu chữ.**
+  Nhờ vậy mỗi màn hình chỉ cần một hàm dịch mã lỗi sang tiếng Việt.
+end note
+
+note bottom of OwnerScreens
+  Màn hình **không bao giờ** gọi thẳng Repository hay Retrofit.
+  Đổi nguồn dữ liệu không phải sửa màn hình nào.
+end note
+
+note bottom of DemoInterceptor
+  Đặt cuối chuỗi, nên app chạy đủ luồng
+  khi không có máy chủ — dùng để trình bày.
+end note
+@enduml

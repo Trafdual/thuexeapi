@@ -1,0 +1,1080 @@
+{
+  "info": {
+    "name": "Sàn thuê xe — API người thuê",
+    "description": "Theo docs/api.md và controller. Chạy từ trên xuống: đăng nhập khách → tải ảnh → nộp giấy tờ → tìm xe → báo giá → đặt xe → xem/huỷ đơn → biên bản.\n\nBiến: baseUrl, renterPhone, renterPassword. Token và id tự bắt từ phản hồi.\n\nTài khoản seed (POST /dev/seed): 0901234567 / test.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5160"
+    },
+    {
+      "key": "renterPhone",
+      "value": "0901234567"
+    },
+    {
+      "key": "renterPassword",
+      "value": "test"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "renterToken",
+      "value": ""
+    },
+    {
+      "key": "carId",
+      "value": ""
+    },
+    {
+      "key": "bookingId",
+      "value": ""
+    },
+    {
+      "key": "handoverId",
+      "value": ""
+    },
+    {
+      "key": "handoverTraId",
+      "value": ""
+    },
+    {
+      "key": "anhUrl",
+      "value": "/files/mau/xe-1.jpg"
+    },
+    {
+      "key": "maDon",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1 · Xác thực",
+      "item": [
+        {
+          "name": "Đăng ký",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"0900000002\",\n  \"password\": \"test\",\n  \"fullName\": \"Khách thuê thử\",\n  \"email\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "OTP in ra log backend ở môi trường dev.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 hoặc PHONE_TAKEN\", () => pm.expect([200,422]).to.include(pm.response.json().status));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xác thực OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "verify-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"0900000002\",\n  \"otp\": \"000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Thay otp bằng mã thật đọc từ log backend thì ra 200 + token.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 hoặc OTP_INVALID\", () => pm.expect([200,422]).to.include(pm.response.json().status));",
+                  "if (pm.response.json().status === 200) pm.collectionVariables.set(\"renterToken\", pm.response.json().data.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đăng nhập (khách)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{renterPhone}}\",\n  \"password\": \"{{renterPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Tự lưu token. Dùng tài khoản seed 0901234567 / test hoặc tài khoản vừa đăng ký.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set(\"token\", d.token);",
+                  "pm.test(\"có profile\", () => pm.expect(d).to.have.property(\"profile\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 · Hồ sơ và giấy tờ",
+      "item": [
+        {
+          "name": "Hồ sơ của tôi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tải ảnh lên",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/files",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "files"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "description": "Body → form-data → file. Tối đa 8MB, jpg/jpeg/png/webp."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));",
+                  "pm.collectionVariables.set(\"anhUrl\", pm.response.json().data.url);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nộp CCCD + GPLX",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "documents"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cccdNo\": \"079201000123\",\n  \"gplxNo\": \"790123456789\",\n  \"gplxClass\": \"B2\",\n  \"gplxExpiry\": \"2031-04-18\",\n  \"frontUrl\": \"{{anhUrl}}\",\n  \"backUrl\": \"{{anhUrl}}\",\n  \"selfieUrl\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Phải được admin duyệt (POST /admin/documents/{id}/review) thì mới đặt xe được, nếu không đặt sẽ báo KYC_REQUIRED."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Khai tài khoản nhận hoàn cọc",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/bank-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "bank-account"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bankAccount\": \"0123456789\",\n  \"bankName\": \"Vietcombank\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Chưa khai thì lệnh hoàn cọc ghi CHUA_CO."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 · Tìm xe",
+      "item": [
+        {
+          "name": "Tìm xe (không lọc)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cars",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cars"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));",
+                  "const it = pm.response.json().data.items; if (it.length) pm.collectionVariables.set(\"carId\", it[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm xe (lọc đủ)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cars?district=Quận 7&from=2026-10-10&to=2026-10-13&seats=4&transmission=SO_SAN&maxPrice=1500000&page=1&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cars"
+              ],
+              "query": [
+                {
+                  "key": "district",
+                  "value": "Quận 7"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-10-10"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-13"
+                },
+                {
+                  "key": "seats",
+                  "value": "4"
+                },
+                {
+                  "key": "transmission",
+                  "value": "SO_SAN"
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "1500000"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "\"Giá trị transmission: SO_SAN hoặc AT (xem dữ liệu seed). Mọi tham số lọc đều tuỳ chọn. Chỉ xe đang bán và còn trống cả khoảng ngày.\"",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": [
+              "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));",
+              "const it = pm.response.json().data.items; if (it.length) pm.collectionVariables.set(\"carId\", it[0].id);"
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Chi tiết xe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cars/{{carId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cars",
+                "{{carId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lịch bận của xe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cars/{{carId}}/availability?from=2026-10-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cars",
+                "{{carId}}",
+                "availability"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-10-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4 · Đặt xe",
+      "item": [
+        {
+          "name": "Báo giá (không tạo đơn)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/quote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings",
+                "quote"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"carId\": {{carId}},\n  \"startDate\": \"2026-10-10\",\n  \"endDate\": \"2026-10-13\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Trả tiền thuê, cọc, tổng phải trả và conTrong. Ngày trả không tính tiền."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đặt xe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"carId\": {{carId}},\n  \"startDate\": \"2026-10-10\",\n  \"endDate\": \"2026-10-13\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Tạo đơn CHO_CHU_XE, giữ 30 phút. Không cần giấy tờ đã duyệt để đặt, nhưng chủ xe chỉ nhận được đơn khi giấy tờ DAT. Lỗi có thể gặp: DEBT_OUTSTANDING, SLOT_TAKEN, CAR_UNAVAILABLE, INVALID_INPUT."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));",
+                  "pm.collectionVariables.set(\"bookingId\", pm.response.json().data.id);",
+                  "pm.collectionVariables.set(\"maDon\", pm.response.json().data.code);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đặt ngày quá khứ",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"carId\": {{carId}},\n  \"startDate\": \"2020-01-01\",\n  \"endDate\": \"2020-01-03\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"422 INVALID_INPUT\", () => { pm.response.to.have.status(422); pm.expect(pm.response.json().code).to.eql(\"INVALID_INPUT\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 · Đơn của tôi",
+      "item": [
+        {
+          "name": "Danh sách đơn",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đơn chờ chủ xe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings?status=CHO_CHU_XE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "CHO_CHU_XE"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chi tiết đơn",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{maDon}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings",
+                "{{maDon}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "\"Kèm thanh toán, biên bản, phụ phí. Tự lưu handoverId của biên bản GIAO (nếu chủ xe đã lập) để ký ở mục 6.\"",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": [
+              "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));",
+              "const h = (pm.response.json().data.handovers || []).find(x => x.kind === 'GIAO'); if (h) pm.collectionVariables.set(\"handoverId\", h.id);"
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Huỷ đơn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{maDon}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings",
+                "{{maDon}}",
+                "cancel"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Khách đổi kế hoạch\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Đã có biên bản GIAO thì WRONG_STATE."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 hoặc WRONG_STATE\", () => pm.expect([200,422]).to.include(pm.response.json().status));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Giả lập đã chuyển khoản (dev)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dev/gia-lap-chuyen-khoan/{{bookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dev",
+                "gia-lap-chuyen-khoan",
+                "{{bookingId}}"
+              ]
+            },
+            "description": "Chỉ môi trường dev. Chủ xe phải nhận đơn trước để có phiếu thu; giấy tờ khách phải được duyệt."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 hoặc lỗi nghiệp vụ\", () => pm.expect([200,422]).to.include(pm.response.json().status));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6 · Biên bản giao/nhận",
+      "item": [
+        {
+          "name": "Lập biên bản TRẢ xe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{maDon}}/handovers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings",
+                "{{maDon}}",
+                "handovers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"TRA\",\n  \"odo\": 42480,\n  \"fuelLevel\": 6,\n  \"note\": \"Trả xe đúng giờ\",\n  \"signature\": \"{{anhUrl}}\",\n  \"photos\": [\n    {\n      \"slot\": \"TRUOC\",\n      \"url\": \"{{anhUrl}}\",\n      \"note\": null\n    },\n    {\n      \"slot\": \"SAU\",\n      \"url\": \"{{anhUrl}}\",\n      \"note\": null\n    },\n    {\n      \"slot\": \"TRAI\",\n      \"url\": \"{{anhUrl}}\",\n      \"note\": null\n    },\n    {\n      \"slot\": \"PHAI\",\n      \"url\": \"{{anhUrl}}\",\n      \"note\": null\n    },\n    {\n      \"slot\": \"TAPLO\",\n      \"url\": \"{{anhUrl}}\",\n      \"note\": null\n    },\n    {\n      \"slot\": \"ODO\",\n      \"url\": \"{{anhUrl}}\",\n      \"note\": null\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Khách chỉ lập được TRA khi đơn ở DANG_THUE, đủ 6 khung ảnh. Biên bản GIAO do chủ xe lập; khách chỉ soi và ký ở bước dưới."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));",
+                  "pm.collectionVariables.set(\"handoverTraId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bổ sung ảnh (vào biên bản GIAO của chủ xe)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/handovers/{{handoverId}}/photos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "handovers",
+                "{{handoverId}}",
+                "photos"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"photos\": [\n    {\n      \"slot\": \"KHAC\",\n      \"url\": \"{{anhUrl}}\",\n      \"note\": \"vết xước cửa trái\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ký biên bản GIAO (đồng ý)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/handovers/{{handoverId}}/review",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "handovers",
+                "{{handoverId}}",
+                "review"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agreed\": true,\n  \"objection\": null,\n  \"signature\": \"{{anhUrl}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Phản đối biên bản GIAO",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/handovers/{{handoverId}}/review",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "handovers",
+                "{{handoverId}}",
+                "review"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agreed\": false,\n  \"objection\": \"Xe có vết xước không ghi trong biên bản\",\n  \"signature\": \"{{anhUrl}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7 · Tin tức",
+      "item": [
+        {
+          "name": "Tin từ sàn",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/news",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.expect(pm.response.json().status).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

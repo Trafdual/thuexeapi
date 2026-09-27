@@ -9,7 +9,13 @@ namespace ThueXe.Services
     {
         private readonly ApplicationDbContext _db;
 
-        public ThanhToanService(ApplicationDbContext db) => _db = db;
+        private readonly ThongBaoService _tb;
+
+        public ThanhToanService(ApplicationDbContext db, ThongBaoService tb)
+        {
+            _db = db;
+            _tb = tb;
+        }
 
         public static class TinhHuong
         {
@@ -102,6 +108,10 @@ namespace ThueXe.Services
             }
 
             await _db.SaveChangesAsync();
+
+            var chuXeId = await _db.Cars.Where(c => c.Id == don.CarId).Select(c => c.OwnerId).FirstAsync();
+            await _tb.Gui(don.RenterId, "Đã nhận tiền", $"Đơn {don.Code} đã được xác nhận thanh toán.", don.Code);
+            await _tb.Gui(chuXeId, "Khách đã thanh toán", $"Đơn {don.Code}: khách đã chuyển tiền, chuẩn bị giao xe.", don.Code);
             return new KetQua(thu, don, KhopSoTien: lech == 0, LechSoTien: lech,
                 HoanThua: hoanThua, TinhHuongXuLy: TinhHuong.DaGhiNhan);
         }

@@ -1,0 +1,48 @@
+@startuml
+' Máy trạng thái đơn — mục 5.4 báo cáo
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam state {
+  BackgroundColor #D5E8D4
+  BorderColor #82B366
+}
+title Trạng thái đơn — mỗi mũi tên là một điểm cuối API
+
+[*] --> CHO_CHU_XE : POST /bookings
+
+CHO_CHU_XE --> CHO_THANH_TOAN : POST /owner/bookings/{id}/confirm\nsinh URL mã QR
+CHO_CHU_XE --> BI_TU_CHOI : POST /owner/bookings/{id}/reject
+CHO_CHU_XE --> HET_HAN : quá 30 phút\ntác vụ nền
+
+CHO_THANH_TOAN --> DA_XAC_NHAN : POST /admin/payments/{id}/confirm\ntiền vào ví treo
+CHO_THANH_TOAN --> HET_HAN : quá 30 phút\ntác vụ nền
+
+DA_XAC_NHAN --> DANG_THUE : POST /handovers/{id}/review\nkhách ký biên bản GIAO
+DANG_THUE --> CHO_QUYET_TOAN : POST /handovers/{id}/review\nchủ xe ký biên bản TRA
+CHO_QUYET_TOAN --> CHO_CHI_TRA : POST /admin/bookings/{id}/settle\nchốt phí, sinh 2 lệnh chi
+CHO_CHI_TRA --> HOAN_TAT : cả hai POST /admin/payouts/{id}/paid
+
+CHO_CHU_XE --> DA_HUY : POST /bookings/{id}/cancel
+CHO_THANH_TOAN --> DA_HUY : POST /bookings/{id}/cancel
+DA_XAC_NHAN --> DA_HUY : POST /bookings/{id}/cancel
+DANG_THUE --> DA_HUY : khách phản đối biên bản GIAO
+
+HOAN_TAT --> [*]
+BI_TU_CHOI --> [*]
+HET_HAN --> [*]
+DA_HUY --> [*]
+
+note right of DA_HUY
+  Mũi tên vào DA_HUY xuất phát từ **nhiều**
+  trạng thái. Sau khi đã ký biên bản GIAO thì
+  không cho huỷ — xe đã ra khỏi tay chủ, phải
+  đi qua đường trả xe.
+end note
+
+note bottom of HOAN_TAT
+  Mọi đường vào BI_TU_CHOI · HET_HAN · DA_HUY
+  đều xoá dải ngày trong car_availability,
+  để xe bán lại được ngay.
+end note
+@enduml

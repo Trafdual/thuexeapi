@@ -12,13 +12,20 @@ namespace ThueXe.Controllers
         private readonly ApplicationDbContext _db;
         private readonly IWebHostEnvironment _env;
         private readonly QrService _qr;
+        private readonly DuLieuMauService _mau;
 
-        public DevSeedController(ApplicationDbContext db, IWebHostEnvironment env, QrService qr)
+        public DevSeedController(ApplicationDbContext db, IWebHostEnvironment env, QrService qr, DuLieuMauService mau)
         {
             _db = db;
             _env = env;
             _qr = qr;
+            _mau = mau;
         }
+
+        private const string ChuXeSdt = "0364184928";
+        private const string KhachSdt = "0901234567";
+        private long _chuXeId;
+        private long _khachId;
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -68,25 +75,62 @@ namespace ThueXe.Controllers
             return thu.Amount;
         }
 
-        [HttpPost]
-        public async Task<IActionResult> Seed()
+        /// Giả lập khách vừa chuyển khoản đủ tiền cho một đơn đang CHO_THANH_TOAN, để demo không
+        /// phải bắn webhook bằng curl. Đi qua đúng ThanhToanService như webhook thật.
+        [HttpPost("/dev/gia-lap-chuyen-khoan/{ma}")]
+        public async Task<ActionResult<BankWebhookResult>> GiaLapChuyenKhoan(string ma, [FromServices] ThanhToanService thanhToan)
         {
             if (!_env.IsDevelopment())
                 throw new BizException("FORBIDDEN", "Chỉ chạy được ở môi trường dev");
 
-            var chuXe = await _db.AppUsers.FindAsync(UserId)
-                        ?? throw new BizException("USER_NOT_FOUND");
+            var thu = await _db.Payments.Include(p => p.Booking)
+                          .FirstOrDefaultAsync(p => p.TransferCode == ma)
+                      ?? throw new BizException("NOT_FOUND", $"Không có phiếu thu mang mã {ma}");
 
-            await XoaDuLieuCu();
+            // Chỉ giả lập cho đơn của chính mình: khách đặt hoặc chủ xe.
+            var xe = await _db.Cars.FindAsync(thu.Booking.CarId);
+            if (thu.Booking.RenterId != UserId && xe?.OwnerId != UserId)
+                throw new BizException("NOT_FOUND", "Không tìm thấy đơn");
+
+            var conThieu = thu.Amount - (thu.ReceivedAmount ?? 0);
+            if (thu.Status == TrangThaiThanhToan.DaNhan || conThieu <= 0)
+                throw new BizException("WRONG_STATE", "Phiếu thu này đã đủ tiền");
+
+            var kq = await thanhToan.GhiTienVao(thu, conThieu,
+                $"GIA-LAP-{DateTimeOffset.UtcNow:HHmmss} · dev · {ma}", nguoiXacNhan: null);
+            return new BankWebhookResult(kq.TinhHuongXuLy, thu.Id, thu.BookingId, kq.Don.Status,
+                kq.Don.Code, "Đã ghi nhận chuyển khoản giả lập");
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Seed([FromQuery] bool xoaHet = false)
+        {
+            if (!_env.IsDevelopment())
+                throw new BizException("FORBIDDEN", "Chỉ chạy được ở môi trường dev");
+
+            // Demo dùng đúng hai tài khoản cố định, ai gọi seed cũng vậy: chủ xe có tất cả xe,
+            // người thuê đặt tất cả đơn mẫu. Thiếu tài khoản nào thì tạo với mật khẩu "test".
+            await _mau.XoaXeVaDon();
+            // xoaHet: xoá luôn mọi tài khoản và ảnh ngoài hai tài khoản demo, để đơn chỉ đi từ hai tài khoản này.
+            var soNguoiXoa = xoaHet ? await _mau.XoaNguoiKhac(new[] { ChuXeSdt, KhachSdt }) : 0;
+            _mau.ChepAnhMau();
+
+            var chuXe = await TaoHoacLayTaiKhoan(ChuXeSdt, "Phạm Quốc Bảo", "0071000123456", "Vietcombank");
+            var khachThue = await TaoHoacLayTaiKhoan(KhachSdt, "Nguyễn Văn An", "0071000654321", "Techcombank");
+            _chuXeId = chuXe.Id;
+            _khachId = khachThue.Id;
 
             chuXe.IsOwner = true;
-            // Ở môi trường dev, người chạy seed kiêm luôn vai vận hành để thử các đường /admin/**.
-            chuXe.Role = Vai.VanHanh;
-            if (!await _db.OwnerAgreements.AnyAsync(a => a.OwnerId == UserId && a.Version == "1.0"))
+            // Người thuê không phải chủ xe (app vào thẳng phần thuê xe) nhưng giữ vai vận hành
+            // để đăng nhập web quản trị và thử các đường /admin/**.
+            khachThue.IsOwner = false;
+            khachThue.Role = Vai.VanHanh;
+
+            if (!await _db.OwnerAgreements.AnyAsync(a => a.OwnerId == chuXe.Id && a.Version == "1.0"))
             {
                 _db.OwnerAgreements.Add(new OwnerAgreement
                 {
-                    OwnerId = UserId,
+                    OwnerId = chuXe.Id,
                     Version = "1.0",
                     CccdNo = "079201000123",
                     BankAccount = "0071000123456",
@@ -95,13 +139,15 @@ namespace ThueXe.Controllers
                 });
             }
 
-            if (!await _db.IdDocuments.AnyAsync(d => d.UserId == UserId))
+            foreach (var (u, cccd, gplx) in new[] { (chuXe, "079201000123", "790123456789"), (khachThue, "079201000456", "790123456456") })
             {
+                var cu = await _db.IdDocuments.Where(d => d.UserId == u.Id).ToListAsync();
+                _db.IdDocuments.RemoveRange(cu);
                 _db.IdDocuments.Add(new IdDocument
                 {
-                    UserId = UserId,
-                    CccdNo = "079201000123",
-                    GplxNo = "790123456789",
+                    UserId = u.Id,
+                    CccdNo = cccd,
+                    GplxNo = gplx,
                     GplxClass = "B2",
                     GplxExpiry = new DateOnly(2031, 4, 18),
                     FrontUrl = "/files/mau/cccd-truoc.jpg",
@@ -110,6 +156,7 @@ namespace ThueXe.Controllers
                     ReviewedAt = DateTimeOffset.UtcNow
                 });
             }
+            await _db.SaveChangesAsync();
 
             var xe = new List<Car>();
             for (var i = 0; i < DanhSachXe.Length; i++)
@@ -117,7 +164,7 @@ namespace ThueXe.Controllers
                 var m = DanhSachXe[i];
                 var c = new Car
                 {
-                    OwnerId = UserId,
+                    OwnerId = _chuXeId,
                     Plate = BienTheoNguoi(m.Bien, i),
                     Brand = m.Hang,
                     Model = m.Dong,
@@ -150,7 +197,7 @@ namespace ThueXe.Controllers
             var don = new List<Booking>();
             foreach (var m in DanhSachDon)
             {
-                var khach = await LayHoacTaoKhach(m.TenKhach, m.Sdt);
+                var khach = khachThue;
                 var c = xe[m.XeThu - 1];
                 var tienThue = c.PricePerDay * m.SoNgay;
 
@@ -214,7 +261,7 @@ namespace ThueXe.Controllers
             {
                 BookingId = daXong.Id,
                 PayeeType = Ben.ChuXe,
-                PayeeId = UserId,
+                PayeeId = _chuXeId,
                 BankAccount = "0071000123456",
                 BankName = "Vietcombank",
                 Amount = daXong.RentTotal - daXong.Commission,
@@ -226,7 +273,7 @@ namespace ThueXe.Controllers
             {
                 BookingId = dangChay.Id,
                 PayeeType = Ben.ChuXe,
-                PayeeId = UserId,
+                PayeeId = _chuXeId,
                 BankAccount = "0071000123456",
                 BankName = "Vietcombank",
                 Amount = dangChay.RentTotal - dangChay.Commission,
@@ -273,7 +320,8 @@ namespace ThueXe.Controllers
                 xe = xe.Count,
                 don = don.Count,
                 bienBan = soBienBan,
-                lenhChi = 2
+                lenhChi = 2,
+                nguoiDungDaXoa = soNguoiXoa
             });
         }
 
@@ -283,7 +331,7 @@ namespace ThueXe.Controllers
         private string MaDonTheoNguoi(int thuTu)
         {
             const string bangChu = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-            var so = UserId * 100 + thuTu;
+            var so = _chuXeId * 100 + thuTu;
             var sb = new System.Text.StringBuilder();
             for (var i = 0; i < 6; i++)
             {
@@ -328,60 +376,29 @@ namespace ThueXe.Controllers
         private string BienTheoNguoi(string bienMau, int thuTu)
         {
             var dauSo = bienMau.Split('-')[0];           // giữ "51A", "51F"...
-            return $"{dauSo}-{UserId % 1000:000}.{thuTu + 1:00}";
+            return $"{dauSo}-{_chuXeId % 1000:000}.{thuTu + 1:00}";
         }
 
-        private async Task XoaDuLieuCu()
+        private async Task<AppUser> TaoHoacLayTaiKhoan(string sdt, string ten, string taiKhoan, string nganHang)
         {
-            var xeCu = await _db.Cars.Where(c => c.OwnerId == UserId).Select(c => c.Id).ToListAsync();
-            var donCu = await _db.Bookings.Where(b => xeCu.Contains(b.CarId)).Select(b => b.Id).ToListAsync();
-
-            _db.Payouts.RemoveRange(await _db.Payouts.Where(p => donCu.Contains(p.BookingId)).ToListAsync());
-            _db.Charges.RemoveRange(await _db.Charges.Where(c => donCu.Contains(c.BookingId)).ToListAsync());
-            _db.LedgerEntries.RemoveRange(await _db.LedgerEntries.Where(l => donCu.Contains(l.BookingId)).ToListAsync());
-            _db.Payments.RemoveRange(await _db.Payments.Where(p => donCu.Contains(p.BookingId)).ToListAsync());
-
-            var bienBanCu = await _db.Handovers.Where(h => donCu.Contains(h.BookingId)).ToListAsync();
-            _db.HandoverPhotos.RemoveRange(
-                await _db.HandoverPhotos.Where(p => bienBanCu.Select(h => h.Id).Contains(p.HandoverId)).ToListAsync());
-            _db.Handovers.RemoveRange(bienBanCu);
-
-            _db.CarAvailabilities.RemoveRange(await _db.CarAvailabilities.Where(a => xeCu.Contains(a.CarId)).ToListAsync());
-            _db.Bookings.RemoveRange(await _db.Bookings.Where(b => donCu.Contains(b.Id)).ToListAsync());
-            _db.CarPhotos.RemoveRange(await _db.CarPhotos.Where(p => xeCu.Contains(p.CarId)).ToListAsync());
-            _db.CarDocuments.RemoveRange(await _db.CarDocuments.Where(d => xeCu.Contains(d.CarId)).ToListAsync());
-            _db.Cars.RemoveRange(await _db.Cars.Where(c => xeCu.Contains(c.Id)).ToListAsync());
-
-            await _db.SaveChangesAsync();
-        }
-
-        private async Task<AppUser> LayHoacTaoKhach(string ten, string sdt)
-        {
-            var khach = await _db.AppUsers.FirstOrDefaultAsync(u => u.Phone == sdt);
-            if (khach is not null) return khach;
-
-            khach = new AppUser
+            var u = await _db.AppUsers.FirstOrDefaultAsync(x => x.Phone == sdt);
+            if (u is null)
             {
-                Phone = sdt,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword("test"),
-                FullName = ten,
-                Status = "HOAT_DONG",
-                // Có sẵn nơi nhận tiền hoàn, để luồng quyết toán không vướng CHUA_CO.
-                BankAccount = "0" + sdt[1..],
-                BankName = "Vietcombank"
-            };
-            _db.AppUsers.Add(khach);
+                u = new AppUser
+                {
+                    Phone = sdt,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("test"),
+                    FullName = ten,
+                    Status = "HOAT_DONG",
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+                _db.AppUsers.Add(u);
+            }
+            // Có sẵn nơi nhận tiền hoàn để luồng quyết toán không vướng CHUA_CO.
+            u.BankAccount ??= taiKhoan;
+            u.BankName ??= nganHang;
             await _db.SaveChangesAsync();
-
-            _db.IdDocuments.Add(new IdDocument
-            {
-                UserId = khach.Id,
-                FrontUrl = "/files/mau/cccd-truoc.jpg",
-                BackUrl = "/files/mau/cccd-sau.jpg",
-                Status = "DAT"
-            });
-            await _db.SaveChangesAsync();
-            return khach;
+            return u;
         }
     }
 }

@@ -44,7 +44,8 @@ namespace ThueXe.Dtos
         DateOnly StartDate, DateOnly EndDate, int Days,
         long PricePerDay, long RentTotal, long Deposit, long Commission,
         string Status, DateTimeOffset? HoldExpiresAt, string? CancelReason,
-        DateTimeOffset CreatedAt);
+        DateTimeOffset CreatedAt,
+        long DebtAmount = 0, DateTimeOffset? DebtPaidAt = null);
 
     public record PaymentDto(
         long Id, long BookingId, long Amount, string TransferCode, string QrUrl,

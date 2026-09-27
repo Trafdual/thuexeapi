@@ -1,0 +1,63 @@
+@startuml
+' Tuần tự đặt xe và thanh toán — mục 5.4 báo cáo
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+title Luồng 1 — đặt xe và thanh toán
+
+actor Khách as KH
+participant "App" as APP
+participant "API" as API
+database "CSDL" as DB
+actor "Chủ xe" as CX
+actor "Người vận hành" as VH
+
+KH -> APP : chọn xe, chọn ngày
+APP -> API : POST /bookings/quote
+API --> APP : giá tạm tính — **chưa ghi gì vào CSDL**
+
+KH -> APP : bấm Đặt xe
+APP -> API : POST /bookings
+API -> DB : BEGIN TRAN · insert booking
+API -> DB : insert car_availability cho từng ngày thuê
+
+alt chèn được hết dải ngày
+  DB --> API : OK
+  API -> DB : COMMIT
+  API --> APP : 201 · đơn CHO_CHU_XE, hẹn giữ 30 phút
+else đụng khoá trùng (car_id, day)
+  DB --> API : DbUpdateException
+  API -> DB : ROLLBACK
+  API --> APP : 422 SLOT_TAKEN\nđơn biến mất, không để lại dòng mồ côi
+end
+
+API -> CX : có đơn mới
+
+alt chủ xe nhận đơn
+  CX -> API : POST /owner/bookings/{id}/confirm
+  API -> DB : sinh URL mã QR · đơn sang CHO_THANH_TOAN
+  API --> APP : mã QR + mã chuyển khoản
+else chủ xe từ chối, hoặc quá 30 phút
+  API -> DB : đơn BI_TU_CHOI hoặc HET_HAN\nxoá dải ngày đã giữ
+  note over API, DB
+    Tác vụ nền DonTreoService quét mỗi phút,
+    không chờ ai bấm gì.
+  end note
+end
+
+KH -> KH : quét QR bằng app ngân hàng
+note right of KH #FFCCCC
+  Tiền đi qua ngân hàng,
+  **không qua sàn**
+end note
+
+VH -> API : GET /admin/payments?status=CHO_XAC_NHAN
+VH -> API : POST /admin/payments/{id}/confirm
+API -> DB : ghi bút toán vào ledger_entry\nđơn sang DA_XAC_NHAN
+API --> APP : đơn đã xác nhận, hiện số điện thoại chủ xe
+
+note over KH, VH
+  Giữa bước tạo đơn và bước xác nhận tiền, **sàn chưa cầm đồng nào**.
+  Mọi lần chủ xe từ chối đều xảy ra trong khoảng đó — nhờ vậy không cần luồng hoàn tiền.
+end note
+@enduml

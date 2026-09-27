@@ -28,7 +28,8 @@ namespace ThueXe.Helpers
             b.Car is null ? null : b.Car.ToBrief(),
             b.Renter is null ? null : b.Renter.ToBrief(b.Status, renterDocStatus),
             b.StartDate, b.EndDate, b.Days, b.PricePerDay, b.RentTotal,
-            b.Deposit, b.Commission, b.Status, b.HoldExpiresAt, b.CancelReason, b.CreatedAt);
+            b.Deposit, b.Commission, b.Status, b.HoldExpiresAt, b.CancelReason, b.CreatedAt,
+            b.DebtAmount, b.DebtPaidAt);
 
         public static HandoverDto ToDto(this Handover h) => new(
             h.Id, h.BookingId, h.Kind, h.CreatedBy, h.Odo, h.FuelLevel, h.Note,

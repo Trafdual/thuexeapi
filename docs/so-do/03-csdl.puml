@@ -1,0 +1,215 @@
+@startuml
+' Sơ đồ quan hệ thực thể — mục 5.2 báo cáo
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam linetype ortho
+hide circle
+title Lược đồ CSDL — 14 bảng, một migration ở sprint 1
+
+package "Người dùng" #DAE8FC {
+  entity app_user {
+    * id : bigint <<PK>>
+    --
+    phone : nvarchar <<UQ>>
+    password_hash : nvarchar
+    full_name : nvarchar
+    email : nvarchar
+    is_owner : bit
+    status : nvarchar
+    role : nvarchar
+    created_at : datetimeoffset
+  }
+  entity id_document {
+    * id : bigint <<PK>>
+    --
+    user_id : bigint <<FK>>
+    cccd_no · gplx_no · gplx_class
+    gplx_expiry : date
+    front_url · back_url · selfie_url
+    status · reject_reason
+    reviewed_by : bigint <<FK>>
+    reviewed_at : datetimeoffset
+  }
+  entity owner_agreement {
+    * id : bigint <<PK>>
+    --
+    owner_id : bigint <<FK>>
+    version : nvarchar
+    cccd_no · bank_account · bank_name
+    signature_url · ip
+    accepted_at : datetimeoffset
+    <<UQ (owner_id, version)>>
+  }
+}
+
+package "Xe" #D5E8D4 {
+  entity car {
+    * id : bigint <<PK>>
+    --
+    owner_id : bigint <<FK>>
+    plate : nvarchar <<UQ>>
+    brand · model · year · seats
+    transmission · fuel · odo
+    district · pickup_address
+    price_per_day : bigint
+    max_km_day : int
+    deposit : bigint
+    status · reject_reason
+    created_at : datetimeoffset
+  }
+  entity car_photo {
+    * id : bigint <<PK>>
+    --
+    car_id : bigint <<FK>> <<cascade>>
+    url · sort_order
+  }
+  entity car_document {
+    * id : bigint <<PK>>
+    --
+    car_id : bigint <<FK>> <<cascade>>
+    type · url · expiry_date
+  }
+  entity car_availability {
+    * car_id : bigint <<FK>> <<cascade>>
+    * day : date
+    --
+    booking_id : bigint
+    <<PK (car_id, day)>>
+    <<không có cột id>>
+  }
+}
+
+package "Đơn và tiền" #FFE6CC {
+  entity booking {
+    * id : bigint <<PK>>
+    --
+    code : nvarchar <<UQ>>
+    car_id : bigint <<FK>>
+    renter_id : bigint <<FK>>
+    start_date · end_date : date
+    days : int
+    price_per_day · rent_total : bigint
+    deposit · commission : bigint
+    status : nvarchar
+    hold_expires_at : datetimeoffset
+    cancel_reason
+    created_at : datetimeoffset
+  }
+  entity payment {
+    * id : bigint <<PK>>
+    --
+    booking_id : bigint <<FK>>
+    amount : bigint
+    transfer_code · qr_url
+    status : nvarchar
+    received_amount : bigint
+    confirmed_by : bigint <<FK>>
+    confirmed_at · bank_note
+  }
+  entity payout {
+    * id : bigint <<PK>>
+    --
+    booking_id : bigint <<FK>>
+    payee_type : nvarchar
+    payee_id : bigint <<FK>>
+    bank_account · bank_name
+    amount : bigint
+    status · transfer_ref
+    paid_by : bigint <<FK>>
+    paid_at · created_at
+  }
+  entity ledger_entry {
+    * id : bigint <<PK>>
+    --
+    booking_id : bigint <<FK>>
+    account : nvarchar
+    direction : nvarchar
+    amount : bigint
+    ref_type : nvarchar
+    ref_id : bigint
+    occurred_at : datetimeoffset
+  }
+}
+
+package "Biên bản" #E1D5E7 {
+  entity handover {
+    * id : bigint <<PK>>
+    --
+    booking_id : bigint <<FK>>
+    kind : nvarchar
+    created_by : nvarchar
+    odo : int
+    fuel_level : int
+    note · status
+    sign_creator · sign_reviewer
+    objection · reviewed_at
+    created_at : datetimeoffset
+    <<UQ (booking_id, kind)>>
+  }
+  entity handover_photo {
+    * id : bigint <<PK>>
+    --
+    handover_id : bigint <<FK>> <<cascade>>
+    slot · url · taken_by · note
+  }
+  entity charge {
+    * id : bigint <<PK>>
+    --
+    booking_id : bigint <<FK>>
+    type : nvarchar
+    amount : bigint
+    note · created_at
+  }
+}
+
+app_user ||--o{ id_document : nộp
+app_user ||--o{ id_document : duyệt (reviewed_by)
+app_user ||--o{ owner_agreement : ký
+app_user ||--o{ car : sở hữu
+app_user ||--o{ booking : thuê
+app_user ||--o{ payout : nhận tiền
+app_user ||--o{ payment : xác nhận tiền
+
+car ||--o{ car_photo
+car ||--o{ car_document
+car ||--o{ car_availability : lịch
+car ||--o{ booking
+
+booking ||--o{ car_availability : giữ ngày
+booking ||--o{ payment : tiền vào
+booking ||--o{ payout : tiền ra
+booking ||--o{ ledger_entry : sổ cái
+booking ||--o{ handover
+booking ||--o{ charge : phí
+
+handover ||--o{ handover_photo
+
+note as N1
+  **app_user xuất hiện ở ba vai**
+  chủ xe của car · người thuê của booking
+  · người duyệt ở id_document.reviewed_by.
+  Vẽ đủ ba đường, đừng gộp.
+end note
+
+note as N2
+  **car_availability không có cột id.**
+  Khoá chính là cặp (car_id, day) — chính nó
+  là trọng tài chống hai người đặt trùng ngày.
+end note
+
+note as N3
+  **ledger_entry trỏ mềm.** Không có khoá ngoại
+  tới payment hay payout; dùng cặp (ref_type, ref_id)
+  vì một bút toán có thể trỏ tới ba loại chứng từ.
+  payment · payout · ledger_entry **chỉ ghi thêm,
+  không bao giờ sửa** — số dư ví treo là tổng của
+  sổ cái, không phải một cột.
+end note
+
+note as N4
+  **Ba quy ước không được phá**
+  Tiền: bigint đơn vị đồng, không dùng số thực
+  Ngày thuê: kiểu date, không phải timestamp
+  Mốc hệ thống: UTC, hiển thị mới đổi giờ VN
+end note
+@enduml

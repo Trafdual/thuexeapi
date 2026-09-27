@@ -1,0 +1,105 @@
+@startuml
+' Sơ đồ ca sử dụng — N3
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam usecase {
+  BackgroundColor #FDFDFD
+  BorderColor #555555
+}
+top to bottom direction
+
+actor "Khách\nthuê" as Khach
+actor "Chủ xe" as ChuXe
+
+rectangle "Sàn thuê xe tự lái" {
+  usecase "Đăng ký,\nxác thực OTP" as UC1
+  usecase "Đăng nhập" as UC2
+  usecase "Nộp CCCD\nvà GPLX" as UC3
+  usecase "Ký cam kết\nchủ xe" as UC4
+
+  usecase "Đăng xe" as UC5
+  usecase "Sửa giá,\nmô tả, ảnh" as UC6
+  usecase "Mở/khoá ngày\ntrong lịch" as UC7
+  usecase "Tìm xe" as UC8
+
+  usecase "Xem giá\ntrước khi đặt" as UC10
+  usecase "Đặt xe" as UC11
+  usecase "Nhận đơn" as UC12
+  usecase "Từ chối đơn" as UC13
+  usecase "Huỷ đơn" as UC14
+  usecase "Theo dõi đơn" as UC15
+  usecase "Chuyển tiền\ntheo QR" as UC16
+
+  usecase "Lập\nbiên bản" as UC21
+  usecase "Bổ sung ảnh" as UC22
+  usecase "Ký hoặc\nphản đối" as UC23
+
+  usecase "Duyệt\ngiấy tờ" as UC24
+  usecase "Duyệt xe" as UC25
+  usecase "Xác nhận\nđã nhận tiền" as UC17
+  usecase "Chốt phí,\nquyết toán" as UC18
+  usecase "Ghi nhận\nđã chuyển tiền" as UC19
+  usecase "Tra sổ cái" as UC20
+
+  usecase "Dọn đơn treo\ntheo mốc thời gian" as UC26
+}
+
+actor "Người\nvận hành" as VanHanh
+actor "Hệ thống" as HeThong
+
+Khach -- UC1
+Khach -- UC2
+Khach -- UC3
+Khach -- UC8
+Khach -- UC10
+Khach -- UC11
+Khach -- UC14
+Khach -- UC15
+Khach -- UC16
+Khach -- UC23
+
+ChuXe -- UC4
+ChuXe -- UC5
+ChuXe -- UC6
+ChuXe -- UC7
+ChuXe -- UC12
+ChuXe -- UC13
+ChuXe -- UC21
+ChuXe -- UC22
+
+UC17 -- VanHanh
+UC18 -- VanHanh
+UC19 -- VanHanh
+UC20 -- VanHanh
+UC24 -- VanHanh
+UC25 -- VanHanh
+
+UC26 -- HeThong
+
+UC11 ..> UC3 : <<include>>
+UC5 ..> UC4 : <<include>>
+UC11 ..> UC10 : <<extend>>
+UC21 ..> UC22 : <<extend>>
+UC21 ..> UC23 : <<include>>
+
+UC1 -[hidden]down- UC8
+UC2 -[hidden]down- UC10
+UC3 -[hidden]down- UC11
+UC4 -[hidden]down- UC12
+UC5 -[hidden]down- UC13
+UC6 -[hidden]down- UC14
+UC7 -[hidden]down- UC15
+UC8 -[hidden]down- UC16
+UC10 -[hidden]down- UC21
+UC11 -[hidden]down- UC22
+UC12 -[hidden]down- UC23
+UC13 -[hidden]down- UC24
+UC14 -[hidden]down- UC25
+UC15 -[hidden]down- UC17
+UC16 -[hidden]down- UC18
+UC21 -[hidden]down- UC19
+UC22 -[hidden]down- UC20
+UC23 -[hidden]down- UC26
+@enduml

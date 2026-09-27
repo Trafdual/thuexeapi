@@ -28,10 +28,14 @@ namespace ThueXe.Data
         public DbSet<Handover> Handovers { get; set; }
         public DbSet<HandoverPhoto> HandoverPhotos { get; set; }
         public DbSet<Charge> Charges { get; set; }
+        public DbSet<DeviceToken> DeviceTokens { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<DeviceToken>().HasIndex(d => d.Token).IsUnique();
+            modelBuilder.Entity<DeviceToken>().HasIndex(d => d.UserId);
 
             // =========================
             // UNIQUE

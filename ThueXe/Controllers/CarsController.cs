@@ -82,6 +82,9 @@ namespace ThueXe.Controllers
 
             var dto = xe.ToDto();
 
+            // Giấy tờ xe (đăng ký, đăng kiểm) chỉ chủ xe và người vận hành thấy, khách thuê không cần.
+            if (xe.OwnerId != UserId) dto = dto with { Documents = new List<CarDocumentDto>() };
+
             // Địa chỉ giao xe chỉ mở cho chủ xe, hoặc cho khách có đơn đã xác nhận.
             if (xe.OwnerId != UserId)
             {

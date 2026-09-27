@@ -100,6 +100,12 @@ namespace ThueXe.Migrations
                     b.Property<int>("Days")
                         .HasColumnType("int");
 
+                    b.Property<long>("DebtAmount")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("DebtPaidAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<long>("Deposit")
                         .HasColumnType("bigint");
 
@@ -319,6 +325,38 @@ namespace ThueXe.Migrations
                     b.HasIndex("BookingId");
 
                     b.ToTable("Charges");
+                });
+
+            modelBuilder.Entity("ThueXe.Models.DeviceToken", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("DeviceTokens");
                 });
 
             modelBuilder.Entity("ThueXe.Models.Handover", b =>

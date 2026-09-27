@@ -11,7 +11,117 @@ namespace ThueXe.Controllers
 
         private readonly ApplicationDbContext _db;
 
-        public AdminBookingsController(ApplicationDbContext db) => _db = db;
+        private readonly ThongBaoService _tb;
+
+        public AdminBookingsController(ApplicationDbContext db, ThongBaoService tb)
+        {
+            _db = db;
+            _tb = tb;
+        }
+
+        // GET /admin/bookings?status= — toàn bộ đơn của sàn, mới nhất trước
+        [HttpGet]
+        public async Task<ActionResult<List<BookingDto>>> DanhSach([FromQuery] string? status)
+        {
+            var q = _db.Bookings
+                .Include(b => b.Car).ThenInclude(c => c.Photos)
+                .Include(b => b.Renter)
+                .AsQueryable();
+            if (!string.IsNullOrWhiteSpace(status))
+                q = q.Where(b => b.Status == status);
+
+            var don = await q.OrderByDescending(b => b.CreatedAt).Take(500).ToListAsync();
+
+            var khachId = don.Select(b => b.RenterId).Distinct().ToList();
+            var giayTo = await _db.IdDocuments
+                .Where(d => khachId.Contains(d.UserId))
+                .GroupBy(d => d.UserId)
+                .Select(g => new { UserId = g.Key, Status = g.OrderByDescending(x => x.Id).First().Status })
+                .ToDictionaryAsync(x => x.UserId, x => x.Status);
+
+            return don.Select(b => b.ToDto(giayTo.GetValueOrDefault(b.RenterId, "CHUA_NOP"))).ToList();
+        }
+
+        // GET /admin/bookings/{khoa} — chi tiết một đơn bất kỳ (người vận hành không phải chủ xe hay khách)
+        [HttpGet("{khoa}")]
+        public async Task<ActionResult<BookingDetailDto>> ChiTiet(string khoa)
+        {
+            var don = await _db.Bookings
+                .Include(b => b.Car).ThenInclude(c => c.Photos)
+                .Include(b => b.Renter)
+                .TheoKhoa(khoa)
+                .FirstOrDefaultAsync()
+                ?? throw new BizException("NOT_FOUND", "Không tìm thấy đơn");
+
+            var thanhToan = await _db.Payments.Where(p => p.BookingId == don.Id)
+                .OrderByDescending(p => p.Id).FirstOrDefaultAsync();
+            var bienBan = await _db.Handovers.Include(h => h.Photos)
+                .Where(h => h.BookingId == don.Id).ToListAsync();
+            var phi = await _db.Charges.Where(c => c.BookingId == don.Id).ToListAsync();
+            var giayTo = await _db.IdDocuments.Where(d => d.UserId == don.RenterId)
+                .OrderByDescending(d => d.Id).Select(d => d.Status).FirstOrDefaultAsync();
+
+            return new BookingDetailDto(
+                don.ToDto(giayTo ?? "CHUA_NOP"),
+                thanhToan is null ? null : new PaymentDto(
+                    thanhToan.Id, thanhToan.BookingId, thanhToan.Amount, thanhToan.TransferCode,
+                    thanhToan.QrUrl, thanhToan.Status, thanhToan.ReceivedAmount,
+                    thanhToan.ConfirmedAt, thanhToan.BankNote),
+                bienBan.Select(h => h.ToDto()).ToList(),
+                phi.Select(c => new ChargeDto(c.Id, c.Type, c.Amount, c.Note)).ToList());
+        }
+
+        // POST /admin/bookings/{id}/debt-paid — khách đã chuyển khoản trả nợ, ghi vào ví treo
+        // và sinh lệnh chi bù cho chủ xe. Gọi lại lần hai không ghi sổ hai lần.
+        [HttpPost("{khoa}/debt-paid")]
+        public async Task<ActionResult<SettleResult>> ThuNo(string khoa)
+        {
+            var don = await _db.Bookings
+                .Include(b => b.Car).ThenInclude(c => c.Photos)
+                .Include(b => b.Renter)
+                .TheoKhoa(khoa)
+                .FirstOrDefaultAsync()
+                ?? throw new BizException("NOT_FOUND", "Không tìm thấy đơn");
+
+            if (don.DebtAmount <= 0)
+                throw new BizException("WRONG_STATE", "Đơn này không có khoản nợ");
+            if (don.DebtPaidAt is not null)
+                throw new BizException("WRONG_STATE", "Khoản nợ đã được thu rồi");
+
+            var chuXe = await _db.OwnerAgreements
+                .Where(a => a.OwnerId == don.Car.OwnerId)
+                .OrderByDescending(a => a.Id)
+                .FirstOrDefaultAsync();
+
+            var chi = new Payout
+            {
+                BookingId = don.Id,
+                PayeeType = Ben.ChuXe,
+                PayeeId = don.Car.OwnerId,
+                Amount = don.DebtAmount,
+                Status = TrangThaiChiTra.Cho,
+                BankAccount = chuXe?.BankAccount ?? ChiTra.ChuaCoSoTaiKhoan,
+                BankName = chuXe?.BankName ?? ChiTra.ChuaCoSoTaiKhoan
+            };
+            _db.Payouts.Add(chi);
+            don.DebtPaidAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync();   // lấy id lệnh chi trước khi ghi sổ
+
+            // Tiền khách trả nợ vào ví treo, rồi ra cho chủ xe: hai cặp bút toán kép.
+            var soCai = new List<LedgerEntry>
+            {
+                Them(don.Id, TaiKhoanSoCai.Khach, Chieu.No, don.DebtAmount, LoaiChungTu.NoPhatSinh, don.Id),
+                Them(don.Id, TaiKhoanSoCai.ViTreo, Chieu.Co, don.DebtAmount, LoaiChungTu.NoPhatSinh, don.Id),
+                Them(don.Id, TaiKhoanSoCai.ViTreo, Chieu.No, don.DebtAmount, LoaiChungTu.ChiTra, chi.Id),
+                Them(don.Id, TaiKhoanSoCai.ChuXe, Chieu.Co, don.DebtAmount, LoaiChungTu.ChiTra, chi.Id),
+            };
+            foreach (var e in soCai) _db.LedgerEntries.Add(e);
+            await _db.SaveChangesAsync();
+
+            return new SettleResult(don.ToDto(), new List<ChargeDto>(),
+                new List<PayoutDto> { chi.ToDto(don.Code) },
+                soCai.Select(e => e.ToDto()).ToList());
+        }
 
         // POST /admin/bookings/{id}/settle — chốt phí, ghi sổ cái, sinh 2 lệnh chi
         [HttpPost("{khoa}/settle")]
@@ -31,13 +141,19 @@ namespace ThueXe.Controllers
                 ? TuDanhSach(req.Charges)
                 : await TuBienBan(don);
 
-            foreach (var c in phi) _db.Charges.Add(c);
+            // Phí do người vận hành nhập tay chưa mang BookingId; thiếu dòng này là vi phạm khoá ngoại.
+            foreach (var c in phi) { c.BookingId = don.Id; _db.Charges.Add(c); }
 
             var tongPhi = phi.Sum(c => c.Amount);
 
             // Phí trừ vào cọc. Phí lớn hơn cọc thì trừ hết cọc, phần thiếu thành khoản nợ (F2):
             // sàn không tự ứng tiền cho chủ xe phần vượt.
             var phiTruVaoCoc = Math.Min(tongPhi, don.Deposit);
+
+            // Phần vượt cọc ghi thành nợ của khách. Chưa vào sổ cái vì chưa có đồng nào vào ví treo;
+            // sổ cái chỉ ghi khi thu được, xem ThuNo.
+            don.DebtAmount = tongPhi - phiTruVaoCoc;
+            don.DebtPaidAt = null;
 
             var chuXeNhan = don.RentTotal - don.Commission + phiTruVaoCoc;
             var sanNhan = don.Commission;
@@ -102,6 +218,12 @@ namespace ThueXe.Controllers
 
             don.Status = TrangThaiDon.ChoChiTra;
             await _db.SaveChangesAsync();
+
+            await _tb.Gui(don.RenterId, "Đơn đã quyết toán",
+                khachHoan > 0 ? $"Đơn {don.Code}: sàn sẽ hoàn {khachHoan:N0}đ vào tài khoản của bạn."
+                              : $"Đơn {don.Code} đã quyết toán.", don.Code);
+            await _tb.Gui(don.Car.OwnerId, "Đơn đã quyết toán",
+                $"Đơn {don.Code}: bạn sẽ nhận {chuXeNhan:N0}đ.", don.Code);
 
             return new SettleResult(
                 don.ToDto(),

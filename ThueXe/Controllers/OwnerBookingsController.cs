@@ -10,10 +10,13 @@ namespace ThueXe.Controllers
         private readonly ApplicationDbContext _db;
         private readonly QrService _qr;
 
-        public OwnerBookingsController(ApplicationDbContext db, QrService qr)
+        private readonly ThongBaoService _tb;
+
+        public OwnerBookingsController(ApplicationDbContext db, QrService qr, ThongBaoService tb)
         {
             _db = db;
             _qr = qr;
+            _tb = tb;
         }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -44,6 +47,16 @@ namespace ThueXe.Controllers
             if (don.Status != TrangThaiDon.ChoChuXe)
                 throw new BizException("WRONG_STATE", $"Đơn đang ở {don.Status}, không nhận được");
 
+            // Giấy tờ khách phải được duyệt trước khi chủ xe nhận, vì nhận đơn là mở luồng thu tiền.
+            var giayTo = await _db.IdDocuments
+                .Where(d => d.UserId == don.RenterId)
+                .OrderByDescending(d => d.Id)
+                .Select(d => d.Status)
+                .FirstOrDefaultAsync();
+            if (giayTo != TrangThaiGiayTo.Dat)
+                throw new BizException("KYC_REQUIRED",
+                    "Khách chưa được sàn duyệt CCCD và GPLX. Chờ sàn duyệt rồi nhận đơn, hoặc từ chối nếu không kịp.");
+
             don.Status = TrangThaiDon.ChoThanhToan;
             // Hẹn tiếp 30 phút cho khách chuyển tiền.
             don.HoldExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30);
@@ -65,6 +78,8 @@ namespace ThueXe.Controllers
             }
 
             await _db.SaveChangesAsync();
+            await _tb.Gui(don.RenterId, "Chủ xe đã nhận đơn",
+                $"Đơn {don.Code}: chuyển {soTien:N0}đ (thuê + cọc) trong 30 phút để giữ xe.", don.Code);
             return (await KemTrangThaiGiayTo(new List<Booking> { don })).Value!.Single();
         }
 
@@ -87,6 +102,7 @@ namespace ThueXe.Controllers
             await NhaLich(don.Id);
 
             await _db.SaveChangesAsync();
+            await _tb.Gui(don.RenterId, "Chủ xe từ chối đơn", $"Đơn {don.Code}: {req.Reason}", don.Code);
             return (await KemTrangThaiGiayTo(new List<Booking> { don })).Value!.Single();
         }
 

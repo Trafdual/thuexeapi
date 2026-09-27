@@ -9,7 +9,33 @@ namespace ThueXe.Controllers
     {
         private readonly ApplicationDbContext _db;
 
-        public AdminCarsController(ApplicationDbContext db) => _db = db;
+        private readonly ThongBaoService _tb;
+        private readonly FileStorageService _files;
+
+        public AdminCarsController(ApplicationDbContext db, ThongBaoService tb, FileStorageService files)
+        {
+            _db = db;
+            _tb = tb;
+            _files = files;
+        }
+
+        // GET /admin/cars/{id}/document/{docId} — ảnh giấy tờ xe, chỉ người vận hành đã đăng nhập.
+        [HttpGet("{id:long}/document/{docId:long}")]
+        public async Task<IActionResult> AnhGiayTo(long id, long docId)
+        {
+            var d = await _db.CarDocuments.FirstOrDefaultAsync(x => x.Id == docId && x.CarId == id)
+                    ?? throw new BizException("NOT_FOUND", "Không tìm thấy giấy tờ");
+            var duongDan = _files.DuongDanGiayTo(d.Url)
+                           ?? throw new BizException("NOT_FOUND", "Không có ảnh này");
+            var loai = Path.GetExtension(duongDan).ToLowerInvariant() switch
+            {
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                _ => "image/jpeg"
+            };
+            Response.Headers.CacheControl = "no-store, private";
+            return PhysicalFile(duongDan, loai);
+        }
 
         // GET /admin/cars?status=CHO_DUYET — hàng chờ duyệt xe
         [HttpGet]
@@ -60,6 +86,11 @@ namespace ThueXe.Controllers
             xe.RejectReason = req.Approved ? null : req.Reason;
 
             await _db.SaveChangesAsync();
+
+            await _tb.Gui(xe.OwnerId,
+                req.Approved ? "Xe đã được duyệt" : "Xe chưa được duyệt",
+                req.Approved ? $"{xe.Brand} {xe.Model} đã hiện trên sàn cho người thuê."
+                             : $"{xe.Brand} {xe.Model}: {req.Reason}");
 
             var cccd = await _db.IdDocuments
                 .Where(d => d.UserId == xe.OwnerId && d.CccdNo != null)

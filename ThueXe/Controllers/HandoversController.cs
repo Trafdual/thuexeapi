@@ -9,7 +9,13 @@ namespace ThueXe.Controllers
     {
         private readonly ApplicationDbContext _db;
 
-        public HandoversController(ApplicationDbContext db) => _db = db;
+        private readonly ThongBaoService _tb;
+
+        public HandoversController(ApplicationDbContext db, ThongBaoService tb)
+        {
+            _db = db;
+            _tb = tb;
+        }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -91,6 +97,14 @@ namespace ThueXe.Controllers
             }
 
             await _db.SaveChangesAsync();
+
+            var nguoiLap = bienBan.CreatedBy == Ben.ChuXe ? don.Car.OwnerId : don.RenterId;
+            var loai = bienBan.Kind == LoaiBienBan.Giao ? "giao xe" : "trả xe";
+            await _tb.Gui(nguoiLap,
+                req.Agreed ? "Biên bản đã được ký" : "Biên bản bị phản đối",
+                req.Agreed ? $"Đơn {don.Code}: biên bản {loai} đã hoàn tất."
+                           : $"Đơn {don.Code}: biên bản {loai} bị phản đối — {req.Objection}",
+                don.Code);
             return bienBan.ToDto();
         }
 

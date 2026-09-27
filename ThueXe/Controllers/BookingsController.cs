@@ -11,7 +11,13 @@ namespace ThueXe.Controllers
 
         private readonly ApplicationDbContext _db;
 
-        public BookingsController(ApplicationDbContext db) => _db = db;
+        private readonly ThongBaoService _tb;
+
+        public BookingsController(ApplicationDbContext db, ThongBaoService tb)
+        {
+            _db = db;
+            _tb = tb;
+        }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -60,14 +66,13 @@ namespace ThueXe.Controllers
             if (xe.OwnerId == UserId)
                 throw new BizException("CAR_UNAVAILABLE", "Không thể thuê xe của chính bạn");
 
-            // A1: chưa được duyệt giấy tờ thì không đặt được.
-            var giayTo = await _db.IdDocuments
-                .Where(d => d.UserId == UserId)
-                .OrderByDescending(d => d.Id)
-                .Select(d => d.Status)
-                .FirstOrDefaultAsync();
-            if (giayTo != TrangThaiGiayTo.Dat)
-                throw new BizException("KYC_REQUIRED", "Cần nộp và được duyệt CCCD, GPLX trước");
+            // Còn nợ từ chuyến trước thì chưa đặt chuyến mới được.
+            if (await _db.Bookings.AnyAsync(b => b.RenterId == UserId && b.DebtAmount > 0 && b.DebtPaidAt == null))
+                throw new BizException("DEBT_OUTSTANDING", "Bạn còn khoản nợ từ chuyến trước, cần thanh toán trước khi đặt chuyến mới");
+
+            // A1 (đã nới): cho đặt trước, giấy tờ được duyệt sau. Chủ xe chỉ nhận được đơn khi
+            // khách đã có giấy tờ được duyệt, xem OwnerBookingsController.Confirm. Nhờ vậy người
+            // mới đăng ký không bị chặn ngay cửa vào trong lúc chờ người vận hành duyệt.
 
             // A3: GPLX hết hạn thì chặn đặt đơn mới.
             var hanGplx = await _db.IdDocuments
@@ -129,6 +134,10 @@ namespace ThueXe.Controllers
             await _db.Entry(don).Reference(b => b.Car).LoadAsync();
             await _db.Entry(don.Car).Collection(c => c.Photos).LoadAsync();
             await _db.Entry(don).Reference(b => b.Renter).LoadAsync();
+
+            await _tb.Gui(xe.OwnerId, "Có đơn thuê mới",
+                $"{don.Renter.FullName} muốn thuê {xe.Brand} {xe.Model} từ {req.StartDate:dd/MM} đến {req.EndDate:dd/MM}. Xác nhận trong 30 phút.",
+                don.Code);
             return don.ToDto();
         }
 
@@ -224,6 +233,9 @@ namespace ThueXe.Controllers
             _db.CarAvailabilities.RemoveRange(dong);
 
             await _db.SaveChangesAsync();
+
+            var benKia = UserId == don.RenterId ? don.Car.OwnerId : don.RenterId;
+            await _tb.Gui(benKia, "Đơn đã bị huỷ", $"Đơn {don.Code} đã huỷ: {req.Reason}", don.Code);
             return don.ToDto();
         }
 
@@ -286,6 +298,10 @@ namespace ThueXe.Controllers
 
             _db.Handovers.Add(bienBan);
             await _db.SaveChangesAsync();
+
+            var loai = req.Kind == LoaiBienBan.Giao ? "giao xe" : "trả xe";
+            await _tb.Gui(laChuXe ? don.RenterId : don.Car.OwnerId, "Cần soi biên bản " + loai,
+                $"Đơn {don.Code}: kiểm tra ảnh và ký biên bản {loai}.", don.Code);
             return bienBan.ToDto();
         }
 

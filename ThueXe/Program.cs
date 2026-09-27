@@ -62,6 +62,9 @@ builder.Services.AddScoped<OtpService>();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<FileStorageService>();
 builder.Services.AddScoped<QrService>();
+builder.Services.AddSingleton<FcmSender>();
+builder.Services.AddScoped<ThongBaoService>();
+builder.Services.AddScoped<DuLieuMauService>();
 builder.Services.AddScoped<ThanhToanService>();
 
 // Nam tac vu nen don don treo — thieu chung thi lich xe bi khoa chet.

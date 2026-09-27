@@ -1,0 +1,51 @@
+@startuml
+' Sơ đồ kiến trúc — mục 5.1 báo cáo
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam ArrowFontSize 11
+title Kiến trúc tổng thể — ba tầng, phụ thuộc một chiều
+
+actor "Khách thuê" as KH
+actor "Chủ xe" as CX
+actor "Người vận hành" as VH
+
+package "Máy khách" #DAE8FC {
+  component "App Android\nKotlin · Jetpack Compose" as APP
+  component "Web quản trị\nLaravel (PHP)" as WEB
+}
+
+package "ASP.NET Core API" #D5E8D4 {
+  component "Controller\nkiểm JWT · kiểm dữ liệu vào\nđổi DTO ↔ thực thể" as CTL
+  component "Service\nMaDonService · QrService\nPhiPhatSinhService · JwtService\nOtpService · FileStorageService" as SVC
+  component "EF Core DbContext\nlối duy nhất chạm CSDL" as EF
+  component "DonTreoService\nBackgroundService · chu kỳ 1 phút" as JOB
+}
+
+database "SQL Server 2022\n14 bảng" as DB #FFE6CC
+folder "uploads/\nphục vụ tĩnh qua /files/**" as UP #FFE6CC
+
+KH --> APP
+CX --> APP
+VH --> WEB
+APP --> CTL : HTTP + JWT
+WEB --> CTL : HTTP + JWT
+CTL --> SVC
+SVC --> EF
+CTL --> UP : POST /files
+EF --> DB : không viết SQL thẳng
+JOB --> EF : quét đơn treo, nhả lịch
+
+note right of EF
+  **Ngoại lệ duy nhất**
+  Chèn dải ngày vào car_availability
+  dùng một câu insert … select, để khoá
+  chính (car_id, day) làm trọng tài
+  chống hai người đặt trùng.
+end note
+
+note bottom of CTL
+  Lỗi nghiệp vụ: BizException → HTTP 422
+  { code, message } — giao diện bắt theo **code**
+end note
+@enduml
