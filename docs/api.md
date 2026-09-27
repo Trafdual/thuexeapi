@@ -497,6 +497,27 @@ Lỗi: `INVALID_INPUT`, `WRONG_STATE`, `FORBIDDEN`.
 Chuyển sang `DA_HUY`, nhả lịch. **Đã có biên bản GIAO thì không huỷ được** — phải đi qua
 đường trả xe. Trả **Booking**.
 
+**Đơn chưa thanh toán** (`CHO_CHU_XE`, `CHO_THANH_TOAN`): huỷ thẳng, không có tiền trong ví
+treo nên không sinh hoàn tiền.
+
+**Đơn đã thanh toán** (`DA_XAC_NHAN`): `RentTotal + Deposit` đang nằm nguyên trong ví treo,
+được chia lại và ghi hai lệnh chi (`Payout`, trạng thái `CHO`) kèm bút toán sổ cái tương ứng:
+
+- **Cọc luôn hoàn đủ 100%** cho khách — cọc là tiền bảo đảm, không phải tiền phạt (cùng
+  nguyên tắc D4 khi khách không tới nhận xe).
+- **Chủ xe huỷ**: khách không có lỗi, hoàn đủ 100% tiền thuê, chủ xe không nhận gì.
+- **Khách huỷ**: tiền thuê chia theo khoảng thời gian còn lại tới `StartDate` —
+
+  | Còn lại tới ngày nhận xe | Khách được hoàn (tiền thuê) |
+  |---|---|
+  | ≥ 7 ngày | 100% |
+  | 3–7 ngày | 70% |
+  | 24–72 giờ | 50% |
+  | < 24 giờ | 0% |
+
+  Phần tiền thuê không hoàn chuyển thành lệnh chi **bồi thường cho chủ xe** (xe đã bị giữ
+  chỗ), không trừ hoa hồng sàn — hoa hồng chỉ tính khi đơn quyết toán trọn vẹn (§7).
+
 Lỗi: `INVALID_INPUT`, `WRONG_STATE`, `FORBIDDEN`.
 
 ---
@@ -610,21 +631,31 @@ Chỉ lệnh chi có `payeeType = CHU_XE` và người nhận là chính bạn.
 
 ## GET /news
 
-⚠ **Không có trong bảng 36 đường dẫn của kế hoạch (§04).** App chủ xe đang gọi để dựng màn
-Tin tức. Nhóm phải chốt: hoặc bổ sung chính thức và làm bảng `news` trong CSDL, hoặc bỏ màn
-Tin tức và xoá `NewsController.cs`. Hiện nội dung cắm cứng trong controller.
-
+⚠ **Không có trong bảng 36 đường dẫn của kế hoạch (§04).** App dùng để dựng màn Tin tức.
 Không cần token.
+
+Lấy tin thật từ RSS mục Xe của VnExpress (`https://vnexpress.net/rss/oto-xe-may.rss`), cache
+20 phút một lần gọi ra ngoài. Chỉ lấy tiêu đề, tóm tắt ngắn (đã bỏ thẻ HTML), ảnh và đường dẫn
+bài gốc — đúng phạm vi mà RSS công khai cho phép, không tải hay hiển thị toàn văn bài viết.
+App ghi rõ "Nguồn: VnExpress" và mở bài gốc trên trình duyệt khi bấm vào, không hiện nội dung
+đó như tin của sàn.
+
+Mất mạng hoặc VnExpress đổi định dạng thì tự rơi về 5 tin cứng cắm trong `NewsController.cs`
+(không có `source`/`link`) để màn Tin tức không trắng trơn.
 
 ```json
 [{
-  "id": 1, "tag": "CHÍNH SÁCH",
-  "title": "Từ 01/10: chi trả cho chủ xe rút xuống trong 12 giờ",
-  "summary": "Sàn rút hạn chuyển tiền từ 24 giờ còn 12 giờ...",
-  "imageUrl": "/files/mau/tin-1.jpg",
-  "publishedAt": "2026-09-21"
+  "id": 1, "tag": "XE",
+  "title": "BMW Việt Nam bán xe M hiệu năng cao, giá từ 4,099 tỷ đồng",
+  "summary": "Các mẫu M2, M3, M3 Touring, M4 do phân nhánh hiệu suất cao M của BMW phát triển...",
+  "imageUrl": "https://i1-vnexpress.vnecdn.net/2026/09/27/....jpg",
+  "publishedAt": "2026-09-27",
+  "source": "VnExpress",
+  "link": "https://vnexpress.net/bmw-viet-nam-ban-xe-m-hieu-nang-cao-gia-tu-4-099-ty-dong-5125304.html"
 }]
 ```
+
+`source` và `link` là `null` ở tin dự phòng (tin của sàn, không mở đâu cả).
 
 ## POST /dev/seed
 
@@ -679,6 +710,11 @@ Xác nhận tiền đã về ví treo.
 { "receivedAmount": 5600000, "bankNote": "CT DEN KNMAAAA8D THUE XE" }
 ```
 
+⚠ **Không bắt buộc gọi tay nữa** — xem `TuDongXacNhanThanhToanService` ở §11: đồ án chưa
+nối cổng thanh toán thật và không phải lúc nào cũng có người vận hành trực để bấm, nên phần
+lớn phiếu thu tự được xác nhận sau ít giây. Điểm cuối này vẫn dùng được, để xác nhận sớm hơn
+hoặc khi cần ghi đúng số tiền thực nhận (thiếu/thừa) từ sao kê thật.
+
 `receivedAmount` là **số tiền của LẦN CHUYỂN NÀY**, không phải tổng. Khách chuyển thiếu rồi
 bù thêm thì backend cộng dồn.
 
@@ -690,6 +726,11 @@ thu, lỗi tốn tiền nhất của khâu đối soát tay. Không dán thì v�
 Ba nhánh: **thiếu** thì không xác nhận, đơn giữ nguyên `CHO_THANH_TOAN`, trả `khopSoTien: false`;
 **đủ** thì ghi 2 bút toán và đơn sang `DA_XAC_NHAN`; **thừa** thì vẫn xác nhận, sinh thêm lệnh
 hoàn phần dư kèm 2 bút toán nữa.
+
+**Tiền về sau khi đơn đã đóng** (hết hạn giữ chỗ, đã huỷ…): không còn `WRONG_STATE` nữa — ghi
+nhận tiền vào ví treo như bình thường rồi hoàn lại NGAY toàn bộ cho khách, đơn giữ nguyên trạng
+thái đã đóng. `refundPayout` trong phản hồi luôn khác `null` ở nhánh này; người vận hành chỉ
+còn việc gọi khách xin lỗi, không phải tự nhớ tạo lệnh hoàn tay.
 
 ## POST /admin/bookings/{maDon}/settle
 
@@ -792,14 +833,28 @@ Script giả lập lúc demo: `docs/ban-tien-ve.sh KNMAAAA8D`.
 
 # 11 · Tác vụ nền
 
-`DonTreoService` chạy mỗi phút, cảnh báo quá hạn mỗi 6 giờ. Năm việc: hết hạn chờ chủ xe,
-hết hạn chờ thanh toán, khách không tới nhận xe, tự chốt sau 24 giờ, cảnh báo chưa trả xe.
-Thiếu chúng thì đơn treo vĩnh viễn và lịch xe bị khoá chết — lỗi kín, không ai thấy cho tới
-lúc chủ xe hỏi vì sao xe mình không ai đặt nữa.
+`DonTreoService` chạy mỗi phút, cảnh báo quá hạn mỗi 6 giờ. Sáu việc: hết hạn chờ chủ xe,
+hết hạn chờ thanh toán, khách không tới nhận xe, tự chốt sau 24 giờ, cảnh báo chưa trả xe,
+và **nhắc giao xe**. Thiếu chúng thì đơn treo vĩnh viễn và lịch xe bị khoá chết — lỗi kín,
+không ai thấy cho tới lúc chủ xe hỏi vì sao xe mình không ai đặt nữa.
+
+**Nhắc giao xe**: đơn `DA_XAC_NHAN` mà `StartDate` là hôm nay hoặc ngày mai và chưa có biên
+bản GIAO thì gửi thông báo đẩy cho cả chủ xe lẫn khách. Cột `Booking.DaNhacGiaoXe` đánh dấu
+đã gửi để không nhắc lại mỗi phút — gửi đúng một lần cho mỗi đơn.
+
+`TuDongXacNhanThanhToanService` chạy riêng, mỗi 5 giây. Phiếu thu (`Payment`) ở trạng thái
+`CHO` quá 15 giây kể từ `CreatedAt` thì tự gọi đúng `ThanhToanService.GhiTienVao` — đứng vào
+đúng chỗ một cổng thanh toán thật (VNPay, MoMo…) sẽ đứng: vẫn sinh sổ cái, vẫn qua ví treo,
+chỉ khác webhook thật ở chỗ không có ngân hàng nào báo về. Người vận hành xác nhận tay trước
+(`/admin/payments/{id}/confirm`) hoặc webhook ngân hàng (§10) báo về trước thì tác vụ này thấy
+phiếu thu đã `DA_NHAN` và bỏ qua — không xác nhận hai lần.
 
 ## POST /me/device-token · DELETE /me/device-token?token=
 Thông báo đẩy (Firebase Cloud Messaging). App gọi `POST` sau khi đăng nhập với `{ "token": "<FCM token>", "platform": "android" }`; gọi lại cùng token thì chỉ cập nhật, token chuyển sang người đăng nhập sau. `DELETE` khi đăng xuất.
 
-Backend gửi thông báo ở các sự kiện: đơn mới (cho chủ xe), chủ xe nhận hoặc từ chối đơn, đã nhận tiền (cả hai bên), huỷ đơn, biên bản cần soi và đã ký hoặc bị phản đối, quyết toán, xe được duyệt hoặc bị từ chối. Payload có `data.bookingCode` khi thông báo gắn với một đơn.
+Backend gửi thông báo ở các sự kiện: đơn mới (cho chủ xe), chủ xe nhận hoặc từ chối đơn, đã nhận tiền (cả hai bên), huỷ đơn, biên bản cần soi và đã ký hoặc bị phản đối, quyết toán, xe được duyệt hoặc bị từ chối, sắp tới giờ giao xe (§11). Payload có `data.bookingCode` khi thông báo gắn với một đơn.
+
+App nhận `bookingCode` này qua Intent lúc bấm vào thông báo (kể cả khi app đang mở sẵn) và mở
+thẳng màn chi tiết đơn tương ứng theo vai đang đăng nhập, thay vì chỉ mở lại màn chính.
 
 Cấu hình: đặt khoá dịch vụ Firebase (Project settings → Service accounts → Generate new private key) vào `ThueXe/firebase-service-account.json`, hoặc đổi đường dẫn ở `Firebase:ServiceAccountPath`. Thiếu tệp này thì backend vẫn chạy bình thường nhưng không gửi thông báo, chỉ ghi cảnh báo vào log.

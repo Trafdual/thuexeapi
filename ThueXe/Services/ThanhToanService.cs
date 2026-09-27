@@ -22,6 +22,9 @@ namespace ThueXe.Services
             public const string DaGhiNhan = "DA_GHI_NHAN";
             public const string ThieuTien = "THIEU_TIEN";
             public const string DaXuLyTruocDo = "DA_XU_LY_TRUOC_DO";
+            /// C6: tiền về sau khi đơn đã đóng (hết hạn giữ chỗ, đã huỷ…) — không còn xe nào để
+            /// giao, sàn không giữ đồng nào của khách nên hoàn ngay toàn bộ.
+            public const string DonDaDongHoanLai = "DON_DA_DONG_HOAN_LAI";
         }
 
         public record KetQua(
@@ -68,7 +71,44 @@ namespace ThueXe.Services
             }
 
             if (don.Status != TrangThaiDon.ChoThanhToan)
-                throw new BizException("WRONG_STATE", $"Đơn đang ở {don.Status}");
+            {
+                if (!TrangThaiDon.DaDong.Contains(don.Status))
+                    throw new BizException("WRONG_STATE", $"Đơn đang ở {don.Status}");
+
+                // C6: đơn đã đóng trước khi tiền kịp về — ghi nhận tiền vào ví treo rồi hoàn lại
+                // NGAY toàn bộ, không chờ người vận hành nhớ ra. Việc của người vận hành chỉ còn
+                // là gọi khách xin lỗi.
+                thu.Status = TrangThaiThanhToan.DaNhan;
+                thu.ConfirmedBy = nguoiXacNhan;
+                thu.ConfirmedAt = DateTimeOffset.UtcNow;
+                GhiSo(don.Id, TaiKhoanSoCai.Khach, Chieu.No, tongDaNhan, LoaiChungTu.ThanhToan, thu.Id);
+                GhiSo(don.Id, TaiKhoanSoCai.ViTreo, Chieu.Co, tongDaNhan, LoaiChungTu.ThanhToan, thu.Id);
+
+                var khachTre = await _db.AppUsers.FindAsync(don.RenterId);
+                var hoanTraTre = new Payout
+                {
+                    BookingId = don.Id,
+                    PayeeType = Ben.Khach,
+                    PayeeId = don.RenterId,
+                    BankAccount = khachTre?.BankAccount ?? ChiTra.ChuaCoSoTaiKhoan,
+                    BankName = khachTre?.BankName ?? ChiTra.ChuaCoSoTaiKhoan,
+                    Amount = tongDaNhan,
+                    Status = TrangThaiChiTra.Cho
+                };
+                _db.Payouts.Add(hoanTraTre);
+                await _db.SaveChangesAsync();   // lấy Id lệnh hoàn trước khi ghi sổ
+
+                GhiSo(don.Id, TaiKhoanSoCai.ViTreo, Chieu.No, tongDaNhan, LoaiChungTu.ChiTra, hoanTraTre.Id);
+                GhiSo(don.Id, TaiKhoanSoCai.Khach, Chieu.Co, tongDaNhan, LoaiChungTu.ChiTra, hoanTraTre.Id);
+                await _db.SaveChangesAsync();
+
+                await _tb.Gui(don.RenterId, "Đã nhận tiền trễ, sẽ hoàn lại",
+                    $"Đơn {don.Code} đã đóng trước khi tiền về. Sàn sẽ hoàn {tongDaNhan:N0}đ vào tài khoản của bạn.",
+                    don.Code);
+
+                return new KetQua(thu, don, KhopSoTien: false, LechSoTien: lech,
+                    HoanThua: hoanTraTre, TinhHuongXuLy: TinhHuong.DonDaDongHoanLai);
+            }
 
             thu.Status = TrangThaiThanhToan.DaNhan;
             thu.ConfirmedBy = nguoiXacNhan;

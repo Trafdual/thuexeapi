@@ -90,7 +90,8 @@ namespace ThueXe.Dtos
     // NGOÀI §04: bảng API của kế hoạch không có GET /news. App chủ xe cần màn tin tức
     // nên tạm để ở đây; nhóm chốt lại rồi hoặc đưa vào docs/api.md hoặc bỏ màn đó.
     public record NewsItemDto(
-        long Id, string Tag, string Title, string Summary, string? ImageUrl, DateOnly? PublishedAt);
+        long Id, string Tag, string Title, string Summary, string? ImageUrl, DateOnly? PublishedAt,
+        string? Source = null, string? Link = null);
 
     public record CapNhatTaiKhoanRequest(string BankAccount, string BankName);
 }

@@ -104,6 +104,8 @@ namespace ThueXe.Common
         public const string Phi = "CHARGE";
         /// Khách trả khoản nợ phí vượt cọc; chứng từ là chính đơn.
         public const string NoPhatSinh = "DEBT";
+        /// Huỷ đơn đã thanh toán: chia tiền thuê theo chính sách huỷ, cọc luôn hoàn đủ.
+        public const string HuyDon = "CANCEL";
     }
 
     public static class LoaiPhi

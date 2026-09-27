@@ -33,11 +33,13 @@ namespace ThueXe.Jobs
                 {
                     using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                    var tb = scope.ServiceProvider.GetRequiredService<ThongBaoService>();
 
                     await HetHanChoChuXe(db);
                     await HetHanChoThanhToan(db);
                     await KhachKhongToiNhanXe(db);
                     await TuChotSau24Gio(db);
+                    await NhacGiaoXe(db, tb);
 
                     if (DateTimeOffset.UtcNow - _lanCanhBaoCuoi >= MoiSauGio)
                     {
@@ -136,6 +138,36 @@ namespace ThueXe.Jobs
                 }
                 _log.LogWarning("Đơn {Ma} huỷ vì khách không tới nhận xe, hoàn cọc {Coc}",
                     b.Code, b.Deposit);
+            }
+            if (don.Count > 0) await db.SaveChangesAsync();
+        }
+
+        /// Nhắc cả hai bên khi ngày giao xe đã tới gần (còn hôm nay hoặc mai) mà đơn vẫn chưa
+        /// có biên bản giao — cùng ngưỡng "sắp phải giao xe" ở màn Tổng quan của app chủ xe.
+        /// Gửi đúng một lần mỗi đơn (DaNhacGiaoXe), không nhắc lại mỗi phút.
+        private async Task NhacGiaoXe(ApplicationDbContext db, ThongBaoService tb)
+        {
+            var ngayMai = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
+            var don = await db.Bookings
+                .Include(b => b.Car)
+                .Where(b => b.Status == TrangThaiDon.DaXacNhan && !b.DaNhacGiaoXe && b.StartDate <= ngayMai)
+                .ToListAsync();
+
+            foreach (var b in don)
+            {
+                var coBienBanGiao = await db.Handovers
+                    .AnyAsync(h => h.BookingId == b.Id && h.Kind == LoaiBienBan.Giao);
+                if (coBienBanGiao) { b.DaNhacGiaoXe = true; continue; }
+
+                var homNay = DateOnly.FromDateTime(DateTime.UtcNow);
+                var ngay = b.StartDate == homNay ? "hôm nay" : "ngày mai";
+                await tb.Gui(b.Car.OwnerId, "Sắp tới giờ giao xe",
+                    $"Đơn {b.Code}: hẹn giao xe {ngay} ({b.StartDate:dd/MM}). Lập biên bản giao khi khách tới.", b.Code);
+                await tb.Gui(b.RenterId, "Sắp tới ngày nhận xe",
+                    $"Đơn {b.Code}: hẹn nhận xe {ngay} ({b.StartDate:dd/MM}). Nhớ mang CCCD và GPLX gốc.", b.Code);
+
+                b.DaNhacGiaoXe = true;
+                _log.LogInformation("Đã nhắc giao xe cho đơn {Ma}", b.Code);
             }
             if (don.Count > 0) await db.SaveChangesAsync();
         }

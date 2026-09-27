@@ -22,6 +22,8 @@
 
         public string? BankNote { get; set; }
 
+        public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
         public Booking Booking { get; set; } = null!;
     }
 }

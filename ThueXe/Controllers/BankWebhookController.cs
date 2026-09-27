@@ -78,6 +78,8 @@ namespace ThueXe.Controllers
             {
                 ThanhToanService.TinhHuong.ThieuTien =>
                     $"Chuyển thiếu {-kq.LechSoTien:N0} đ, đơn giữ nguyên chờ khách chuyển bù",
+                ThanhToanService.TinhHuong.DonDaDongHoanLai =>
+                    $"Đơn đã đóng trước khi tiền về — đã sinh lệnh hoàn {kq.HoanThua?.Amount:N0} đ, gọi khách xin lỗi",
                 _ when kq.LechSoTien > 0 =>
                     $"Chuyển thừa {kq.LechSoTien:N0} đ, đã sinh lệnh hoàn cho khách",
                 _ => "Đã ghi tiền vào ví treo",

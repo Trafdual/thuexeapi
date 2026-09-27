@@ -207,7 +207,9 @@ namespace ThueXe.Controllers
                 phi.Select(c => new ChargeDto(c.Id, c.Type, c.Amount, c.Note)).ToList());
         }
 
-        // POST /bookings/{id}/cancel — nhả lịch, ghi lý do
+        // POST /bookings/{id}/cancel — nhả lịch, ghi lý do. Đơn đã thanh toán (DA_XAC_NHAN) thì
+        // chia tiền thuê theo chính sách huỷ; cọc luôn hoàn đủ vì cọc là tiền bảo đảm, không phải
+        // tiền phạt (cùng nguyên tắc DonTreoService dùng khi khách không tới nhận xe).
         [HttpPost("{khoa}/cancel")]
         public async Task<ActionResult<BookingDto>> Cancel(string khoa, CancelBookingRequest req)
         {
@@ -225,6 +227,9 @@ namespace ThueXe.Controllers
             if (coBienBanGiao)
                 throw new BizException("WRONG_STATE", "Đã có biên bản giao, phải đi qua đường trả xe");
 
+            var laKhachHuy = UserId == don.RenterId;
+            var daThanhToan = don.Status == TrangThaiDon.DaXacNhan;
+
             don.Status = TrangThaiDon.DaHuy;
             don.CancelReason = req.Reason;
             don.HoldExpiresAt = null;
@@ -232,11 +237,101 @@ namespace ThueXe.Controllers
             var dong = await _db.CarAvailabilities.Where(a => a.BookingId == don.Id).ToListAsync();
             _db.CarAvailabilities.RemoveRange(dong);
 
+            long hoanKhach = 0, denBuChuXe = 0;
+            if (daThanhToan)
+                (hoanKhach, denBuChuXe) = await HoanTienHuyDon(don, laKhachHuy);
+
             await _db.SaveChangesAsync();
 
             var benKia = UserId == don.RenterId ? don.Car.OwnerId : don.RenterId;
-            await _tb.Gui(benKia, "Đơn đã bị huỷ", $"Đơn {don.Code} đã huỷ: {req.Reason}", don.Code);
+            var noiDungHuy = $"Đơn {don.Code} đã huỷ: {req.Reason}";
+            if (daThanhToan)
+                noiDungHuy += hoanKhach > 0 ? $" Sàn sẽ hoàn {hoanKhach:N0}đ." : " Theo chính sách huỷ, không có khoản hoàn.";
+            await _tb.Gui(benKia, "Đơn đã bị huỷ", noiDungHuy, don.Code);
             return don.ToDto();
+        }
+
+        /// Chia RentTotal + Deposit (đang nằm nguyên trong ví treo) giữa khách và chủ xe.
+        /// Cọc hoàn đủ cho khách trong mọi trường hợp. Tiền thuê:
+        ///  - Chủ xe huỷ: khách không có lỗi, hoàn đủ 100% tiền thuê.
+        ///  - Khách huỷ: hoàn theo mốc còn lại tới ngày nhận xe — trước 7 ngày 100%, còn 3–7 ngày
+        ///    70%, còn 24–72 giờ 50%, dưới 24 giờ 0%. Phần không hoàn coi là bồi thường cho chủ xe
+        ///    vì xe đã bị giữ chỗ, không trừ hoa hồng sàn (hoa hồng chỉ tính khi đơn chạy trọn).
+        /// Trả về (số hoàn khách, số đền bù chủ xe) để ghi vào thông báo.
+        private async Task<(long HoanKhach, long DenBuChuXe)> HoanTienHuyDon(Booking don, bool laKhachHuy)
+        {
+            long hoanTienThue;
+            if (!laKhachHuy)
+            {
+                hoanTienThue = don.RentTotal;
+            }
+            else
+            {
+                var conLai = don.StartDate.ToDateTime(TimeOnly.MinValue) - DateTime.UtcNow;
+                var tyLe = conLai switch
+                {
+                    var t when t >= TimeSpan.FromDays(7) => 1.00,
+                    var t when t >= TimeSpan.FromHours(72) => 0.70,
+                    var t when t >= TimeSpan.FromHours(24) => 0.50,
+                    _ => 0.00
+                };
+                hoanTienThue = (long)(don.RentTotal * tyLe);
+            }
+
+            var hoanKhach = don.Deposit + hoanTienThue;
+            var denBuChuXe = don.RentTotal - hoanTienThue;
+
+            if (hoanKhach > 0)
+            {
+                var khach = await _db.AppUsers.FindAsync(don.RenterId);
+                var lenhHoan = new Payout
+                {
+                    BookingId = don.Id,
+                    PayeeType = Ben.Khach,
+                    PayeeId = don.RenterId,
+                    BankAccount = khach?.BankAccount ?? ChiTra.ChuaCoSoTaiKhoan,
+                    BankName = khach?.BankName ?? ChiTra.ChuaCoSoTaiKhoan,
+                    Amount = hoanKhach,
+                    Status = TrangThaiChiTra.Cho
+                };
+                _db.Payouts.Add(lenhHoan);
+                await _db.SaveChangesAsync();
+                GhiSoCancel(don.Id, TaiKhoanSoCai.Khach, hoanKhach, lenhHoan.Id);
+            }
+            if (denBuChuXe > 0)
+            {
+                var chuXe = await _db.AppUsers.FindAsync(don.Car.OwnerId);
+                var lenhDenBu = new Payout
+                {
+                    BookingId = don.Id,
+                    PayeeType = Ben.ChuXe,
+                    PayeeId = don.Car.OwnerId,
+                    BankAccount = chuXe?.BankAccount ?? ChiTra.ChuaCoSoTaiKhoan,
+                    BankName = chuXe?.BankName ?? ChiTra.ChuaCoSoTaiKhoan,
+                    Amount = denBuChuXe,
+                    Status = TrangThaiChiTra.Cho
+                };
+                _db.Payouts.Add(lenhDenBu);
+                await _db.SaveChangesAsync();
+                GhiSoCancel(don.Id, TaiKhoanSoCai.ChuXe, denBuChuXe, lenhDenBu.Id);
+            }
+            return (hoanKhach, denBuChuXe);
+        }
+
+        /// Tiền đang nằm nguyên trong ví treo (No), trả về cho người nhận (Co) — cùng cách ghi
+        /// sổ ThanhToanService dùng khi hoàn phần chuyển thừa.
+        private void GhiSoCancel(long donId, string taiKhoanNhan, long soTien, long chungTuId)
+        {
+            _db.LedgerEntries.Add(new LedgerEntry
+            {
+                BookingId = donId, Account = TaiKhoanSoCai.ViTreo, Direction = Chieu.No,
+                Amount = soTien, RefType = LoaiChungTu.HuyDon, RefId = chungTuId
+            });
+            _db.LedgerEntries.Add(new LedgerEntry
+            {
+                BookingId = donId, Account = taiKhoanNhan, Direction = Chieu.Co,
+                Amount = soTien, RefType = LoaiChungTu.HuyDon, RefId = chungTuId
+            });
         }
 
         // POST /bookings/{id}/handovers — bên lập nộp biên bản, vào trạng thái CHO_SOI

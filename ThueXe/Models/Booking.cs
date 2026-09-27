@@ -36,6 +36,9 @@ namespace ThueXe.Models
         public long DebtAmount { get; set; }
         public DateTimeOffset? DebtPaidAt { get; set; }
 
+        /// Đã gửi thông báo nhắc giao xe chưa — gửi đúng một lần, xem DonTreoService.NhacGiaoXe.
+        public bool DaNhacGiaoXe { get; set; }
+
         public DateTimeOffset CreatedAt { get; set; }
             = DateTimeOffset.UtcNow;
 

@@ -1,6 +1,6 @@
 namespace ThueXe.Dtos
 {
-    public record RegisterRequest(string Phone, string Password, string FullName, string? Email);
+    public record RegisterRequest(string Phone, string Password, string FullName, string? Email, bool IsOwner = false);
     public record VerifyOtpRequest(string Phone, string Otp);
     public record LoginRequest(string Phone, string Password);
 

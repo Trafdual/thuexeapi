@@ -57,6 +57,11 @@ builder.Services.AddAuthorization();
 
 // ── Dịch vụ nghiệp vụ ────────────────────────────────────────────────
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient("vnexpress", c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(6);
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("ThueXeApp/1.0 (+doc an mon Cong nghe phan mem)");
+});
 
 builder.Services.AddScoped<OtpService>();
 builder.Services.AddScoped<JwtService>();
@@ -69,6 +74,7 @@ builder.Services.AddScoped<ThanhToanService>();
 
 // Nam tac vu nen don don treo — thieu chung thi lich xe bi khoa chet.
 builder.Services.AddHostedService<ThueXe.Jobs.DonTreoService>();
+builder.Services.AddHostedService<ThueXe.Jobs.TuDongXacNhanThanhToanService>();
 
 // ── MVC / API ─────────────────────────────────────────────────────────
 builder.Services.AddControllers(o => o.Filters.Add<ThueXe.Middleware.BocKetQuaFilter>())

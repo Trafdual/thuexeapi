@@ -37,7 +37,7 @@ namespace ThueXe.Controllers
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
                 FullName = req.FullName,
                 Email = req.Email,
-                IsOwner = false,
+                IsOwner = req.IsOwner,
                 Status = "HOAT_DONG",
                 CreatedAt = DateTimeOffset.UtcNow
             };
