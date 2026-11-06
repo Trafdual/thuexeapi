@@ -55,9 +55,23 @@ namespace ThueXe.Dtos
         long Id, long BookingId, string? BookingCode, string PayeeType,
         NguoiDungTomTat Payee, string BankAccount, string BankName,
         long Amount, string Status, string? TransferRef,
-        DateTimeOffset? PaidAt, DateTimeOffset CreatedAt);
+        DateTimeOffset? PaidAt, DateTimeOffset CreatedAt, string? FailNote = null);
 
     public record MarkPaidRequest(string TransferRef);
+
+    public record MarkPayoutFailedRequest(string Reason);
+
+    // ── Tranh chấp ────────────────────────────────────────────────────
+    /// Outcome: RESUME (đơn không sao, quay lại trạng thái cũ) |
+    /// CANCEL_REFUND_RENTER (lỗi chủ xe: huỷ, hoàn 100% cho khách) |
+    /// CANCEL_COMPENSATE_OWNER (lỗi khách: huỷ, hoàn cọc, tiền thuê đền bù chủ xe).
+    public record ResolveDisputeRequest(string Outcome, string? Note);
+
+    // ── Phạt nguội sau khi đơn đã đóng ────────────────────────────────
+    public record LateFineRequest(long Amount, string Note);
+
+    // ── Khoá tài khoản ────────────────────────────────────────────────
+    public record LockUserRequest(string Reason);
 
     // ── Sổ cái ────────────────────────────────────────────────────────
     public record LedgerResult(

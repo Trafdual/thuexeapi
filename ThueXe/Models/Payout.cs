@@ -20,6 +20,10 @@
 
         public string? TransferRef { get; set; }
 
+        /// Lý do khi người vận hành đánh dấu LOI — tài khoản sai, ngân hàng từ chối… Sửa xong
+        /// thì vẫn gọi lại /paid bình thường, không cần lệnh chi mới.
+        public string? FailNote { get; set; }
+
         public long? PaidBy { get; set; }
 
         public DateTimeOffset? PaidAt { get; set; }

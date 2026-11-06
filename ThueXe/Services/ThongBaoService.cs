@@ -115,5 +115,17 @@ namespace ThueXe.Services
                 _log.LogWarning(ex, "Gửi thông báo cho user {User} thất bại", userId);
             }
         }
+
+        /// Việc cần người vận hành để mắt: tranh chấp mới mở, đơn treo quá lâu. Đội vận hành
+        /// còn nhỏ nên báo hết cho mọi tài khoản VAN_HANH, không phân việc theo người.
+        public async Task GuiChoVanHanh(string tieuDe, string noiDung, string? donCode = null)
+        {
+            var vanHanhIds = await _db.AppUsers
+                .Where(u => u.Role == Vai.VanHanh)
+                .Select(u => u.Id)
+                .ToListAsync();
+            foreach (var id in vanHanhIds)
+                await Gui(id, tieuDe, noiDung, donCode);
+        }
     }
 }

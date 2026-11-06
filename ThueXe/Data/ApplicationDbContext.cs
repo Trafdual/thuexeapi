@@ -29,6 +29,8 @@ namespace ThueXe.Data
         public DbSet<HandoverPhoto> HandoverPhotos { get; set; }
         public DbSet<Charge> Charges { get; set; }
         public DbSet<DeviceToken> DeviceTokens { get; set; }
+        public DbSet<Incident> Incidents { get; set; }
+        public DbSet<IncidentPhoto> IncidentPhotos { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -71,6 +73,11 @@ namespace ThueXe.Data
                     x.Kind
                 })
                 .IsUnique();
+
+            // Dòng cũ trước khi có cột này (VA_CHAM/KHAC) mặc định là KHAC.
+            modelBuilder.Entity<Incident>()
+                .Property(x => x.Type)
+                .HasDefaultValue(LoaiSuCo.Khac);
 
             modelBuilder.Entity<Booking>()
                 .HasIndex(x => x.Code)

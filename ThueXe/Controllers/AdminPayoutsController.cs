@@ -68,5 +68,27 @@ namespace ThueXe.Controllers
             await _db.SaveChangesAsync();
             return lenh.ToDto(don?.Code);
         }
+
+        // POST /admin/payouts/{id}/failed — tài khoản sai, ngân hàng từ chối… Không đổi Amount
+        // hay BankAccount, chỉ đánh dấu để người vận hành lọc ra sửa rồi gọi lại /paid như bình
+        // thường — retry đi thẳng qua đường có sẵn, không cần lệnh chi mới.
+        [HttpPost("{id:long}/failed")]
+        public async Task<ActionResult<PayoutDto>> MarkFailed(long id, MarkPayoutFailedRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.Reason))
+                throw new BizException("INVALID_INPUT", "Phải ghi rõ lý do chuyển thất bại");
+
+            var lenh = await _db.Payouts.Include(p => p.Booking)
+                .FirstOrDefaultAsync(p => p.Id == id)
+                ?? throw new BizException("NOT_FOUND", "Không tìm thấy lệnh chi");
+
+            if (lenh.Status == TrangThaiChiTra.DaChi)
+                throw new BizException("WRONG_STATE", "Lệnh chi này đã chuyển rồi, không đánh dấu lỗi được");
+
+            lenh.Status = TrangThaiChiTra.Loi;
+            lenh.FailNote = req.Reason;
+            await _db.SaveChangesAsync();
+            return lenh.ToDto(lenh.Booking?.Code);
+        }
     }
 }

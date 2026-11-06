@@ -27,6 +27,16 @@ namespace ThueXe.Models
         public string? BankAccount { get; set; }
         public string? BankName { get; set; }
 
+        /// Số lần bị ghi nhận là bên có lỗi: không phản hồi trong 30 phút, không tới giao/nhận
+        /// xe, hoặc thua trong một vụ tranh chấp. Mới chỉ đếm để người vận hành tham khảo,
+        /// CHƯA có ngưỡng nào tự khoá tài khoản — xem IsLocked để khoá tay.
+        public int IncidentCount { get; set; }
+
+        /// Người vận hành khoá tay: gian lận, quấy rối, hoặc nợ quá hạn không chịu trả.
+        /// Khoá thì không đặt/nhận đơn mới được nữa — xem BookingsController.Create.
+        public bool IsLocked { get; set; }
+        public string? LockReason { get; set; }
+
         public DateTimeOffset CreatedAt { get; set; }
             = DateTimeOffset.UtcNow;
 

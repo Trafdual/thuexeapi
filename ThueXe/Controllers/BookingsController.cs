@@ -13,10 +13,13 @@ namespace ThueXe.Controllers
 
         private readonly ThongBaoService _tb;
 
-        public BookingsController(ApplicationDbContext db, ThongBaoService tb)
+        private readonly HoanTraService _hoanTra;
+
+        public BookingsController(ApplicationDbContext db, ThongBaoService tb, HoanTraService hoanTra)
         {
             _db = db;
             _tb = tb;
+            _hoanTra = hoanTra;
         }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -65,6 +68,12 @@ namespace ThueXe.Controllers
             // B4: không thuê xe của chính mình.
             if (xe.OwnerId == UserId)
                 throw new BizException("CAR_UNAVAILABLE", "Không thể thuê xe của chính bạn");
+
+            // Bị người vận hành khoá tay: gian lận, quấy rối, hoặc nợ quá hạn không chịu trả.
+            var toiLaKhachDangDat = await _db.AppUsers.FindAsync(UserId);
+            if (toiLaKhachDangDat?.IsLocked == true)
+                throw new BizException("ACCOUNT_LOCKED",
+                    "Tài khoản đang bị khoá" + (toiLaKhachDangDat.LockReason is null ? "" : $": {toiLaKhachDangDat.LockReason}"));
 
             // Còn nợ từ chuyến trước thì chưa đặt chuyến mới được.
             if (await _db.Bookings.AnyAsync(b => b.RenterId == UserId && b.DebtAmount > 0 && b.DebtPaidAt == null))
@@ -156,7 +165,7 @@ namespace ThueXe.Controllers
         /// B3: ngày quá khứ, hoặc ngày trả không sau ngày nhận → chặn ngay ở tầng dữ liệu vào.
         private static int KiemNgay(DateOnly batDau, DateOnly ketThuc)
         {
-            var homNay = DateOnly.FromDateTime(DateTime.UtcNow);
+            var homNay = GioVN.HomNay;
             if (batDau < homNay)
                 throw new BizException("INVALID_INPUT", "Không đặt được ngày trong quá khứ");
             if (ketThuc <= batDau)
@@ -191,6 +200,9 @@ namespace ThueXe.Controllers
 
             var phi = await _db.Charges.Where(c => c.BookingId == don.Id).ToListAsync();
 
+            var suCo = await _db.Incidents.Include(i => i.Photos)
+                .Where(i => i.BookingId == don.Id).ToListAsync();
+
             var giayTo = await _db.IdDocuments
                 .Where(d => d.UserId == don.RenterId)
                 .OrderByDescending(d => d.Id)
@@ -204,7 +216,8 @@ namespace ThueXe.Controllers
                     thanhToan.QrUrl, thanhToan.Status, thanhToan.ReceivedAmount,
                     thanhToan.ConfirmedAt, thanhToan.BankNote),
                 bienBan.Select(h => h.ToDto()).ToList(),
-                phi.Select(c => new ChargeDto(c.Id, c.Type, c.Amount, c.Note)).ToList());
+                phi.Select(c => new ChargeDto(c.Id, c.Type, c.Amount, c.Note)).ToList(),
+                suCo.Select(i => i.ToDto()).ToList());
         }
 
         // POST /bookings/{id}/cancel — nhả lịch, ghi lý do. Đơn đã thanh toán (DA_XAC_NHAN) thì
@@ -220,6 +233,11 @@ namespace ThueXe.Controllers
 
             if (TrangThaiDon.DaDong.Contains(don.Status))
                 throw new BizException("WRONG_STATE", "Đơn đã đóng");
+
+            // Đang tranh chấp thì không ai được tự huỷ vòng qua người vận hành — chờ
+            // /admin/bookings/{id}/dispute/resolve kết luận rồi tính tiếp.
+            if (don.Status == TrangThaiDon.TranhChap)
+                throw new BizException("WRONG_STATE", "Đơn đang tranh chấp, chờ người vận hành xử lý");
 
             // G4: xe đã ra khỏi tay chủ thì phải đi qua đường trả xe, không huỷ được nữa.
             var coBienBanGiao = await _db.Handovers
@@ -267,7 +285,7 @@ namespace ThueXe.Controllers
             }
             else
             {
-                var conLai = don.StartDate.ToDateTime(TimeOnly.MinValue) - DateTime.UtcNow;
+                var conLai = don.StartDate.ToDateTime(TimeOnly.MinValue) - GioVN.BayGio.DateTime;
                 var tyLe = conLai switch
                 {
                     var t when t >= TimeSpan.FromDays(7) => 1.00,
@@ -281,57 +299,10 @@ namespace ThueXe.Controllers
             var hoanKhach = don.Deposit + hoanTienThue;
             var denBuChuXe = don.RentTotal - hoanTienThue;
 
-            if (hoanKhach > 0)
-            {
-                var khach = await _db.AppUsers.FindAsync(don.RenterId);
-                var lenhHoan = new Payout
-                {
-                    BookingId = don.Id,
-                    PayeeType = Ben.Khach,
-                    PayeeId = don.RenterId,
-                    BankAccount = khach?.BankAccount ?? ChiTra.ChuaCoSoTaiKhoan,
-                    BankName = khach?.BankName ?? ChiTra.ChuaCoSoTaiKhoan,
-                    Amount = hoanKhach,
-                    Status = TrangThaiChiTra.Cho
-                };
-                _db.Payouts.Add(lenhHoan);
-                await _db.SaveChangesAsync();
-                GhiSoCancel(don.Id, TaiKhoanSoCai.Khach, hoanKhach, lenhHoan.Id);
-            }
-            if (denBuChuXe > 0)
-            {
-                var chuXe = await _db.AppUsers.FindAsync(don.Car.OwnerId);
-                var lenhDenBu = new Payout
-                {
-                    BookingId = don.Id,
-                    PayeeType = Ben.ChuXe,
-                    PayeeId = don.Car.OwnerId,
-                    BankAccount = chuXe?.BankAccount ?? ChiTra.ChuaCoSoTaiKhoan,
-                    BankName = chuXe?.BankName ?? ChiTra.ChuaCoSoTaiKhoan,
-                    Amount = denBuChuXe,
-                    Status = TrangThaiChiTra.Cho
-                };
-                _db.Payouts.Add(lenhDenBu);
-                await _db.SaveChangesAsync();
-                GhiSoCancel(don.Id, TaiKhoanSoCai.ChuXe, denBuChuXe, lenhDenBu.Id);
-            }
-            return (hoanKhach, denBuChuXe);
-        }
+            await _hoanTra.ChiTuViTreo(don.Id, Ben.Khach, don.RenterId, hoanKhach, LoaiChungTu.HuyDon);
+            await _hoanTra.ChiTuViTreo(don.Id, Ben.ChuXe, don.Car.OwnerId, denBuChuXe, LoaiChungTu.HuyDon);
 
-        /// Tiền đang nằm nguyên trong ví treo (No), trả về cho người nhận (Co) — cùng cách ghi
-        /// sổ ThanhToanService dùng khi hoàn phần chuyển thừa.
-        private void GhiSoCancel(long donId, string taiKhoanNhan, long soTien, long chungTuId)
-        {
-            _db.LedgerEntries.Add(new LedgerEntry
-            {
-                BookingId = donId, Account = TaiKhoanSoCai.ViTreo, Direction = Chieu.No,
-                Amount = soTien, RefType = LoaiChungTu.HuyDon, RefId = chungTuId
-            });
-            _db.LedgerEntries.Add(new LedgerEntry
-            {
-                BookingId = donId, Account = taiKhoanNhan, Direction = Chieu.Co,
-                Amount = soTien, RefType = LoaiChungTu.HuyDon, RefId = chungTuId
-            });
+            return (hoanKhach, denBuChuXe);
         }
 
         // POST /bookings/{id}/handovers — bên lập nộp biên bản, vào trạng thái CHO_SOI
@@ -398,6 +369,102 @@ namespace ThueXe.Controllers
             await _tb.Gui(laChuXe ? don.RenterId : don.Car.OwnerId, "Cần soi biên bản " + loai,
                 $"Đơn {don.Code}: kiểm tra ảnh và ký biên bản {loai}.", don.Code);
             return bienBan.ToDto();
+        }
+
+        /// POST /bookings/{id}/dispute — bên nào cũng mở được khi thấy bên kia không giữ đúng
+        /// cam kết (chủ xe không giao xe, phí quyết toán vô lý…). Đơn đứng lại ở TRANH_CHAP,
+        /// người vận hành xử qua /admin/bookings/{id}/dispute/resolve.
+        [HttpPost("{khoa}/dispute")]
+        public async Task<ActionResult<BookingDto>> OpenDispute(string khoa, OpenDisputeRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.Reason))
+                throw new BizException("INVALID_INPUT", "Phải ghi rõ lý do tranh chấp");
+
+            var don = await LayDonLienQuan(khoa);
+
+            var coTheTranhChap = new[]
+                { TrangThaiDon.DaXacNhan, TrangThaiDon.DangThue, TrangThaiDon.ChoQuyetToan };
+            if (!coTheTranhChap.Contains(don.Status))
+                throw new BizException("WRONG_STATE", $"Đơn đang ở {don.Status}, không mở tranh chấp được");
+
+            don.PreDisputeStatus = don.Status;
+            don.Status = TrangThaiDon.TranhChap;
+            don.DisputeReason = req.Reason;
+            don.DisputeOpenedBy = UserId == don.RenterId ? Ben.Khach : Ben.ChuXe;
+            don.DisputeOpenedAt = DateTimeOffset.UtcNow;
+            don.DisputeResolvedBy = null;
+            await _db.SaveChangesAsync();
+
+            var benKia = UserId == don.RenterId ? don.Car.OwnerId : don.RenterId;
+            await _tb.Gui(benKia, "Đơn đang bị tranh chấp", $"Đơn {don.Code}: {req.Reason}", don.Code);
+            await _tb.GuiChoVanHanh("Có tranh chấp mới", $"Đơn {don.Code}: {req.Reason}", don.Code);
+            return don.ToDto();
+        }
+
+        /// POST /bookings/{id}/incidents — ghi lại sự cố giữa chuyến kèm ảnh, KHÔNG đổi trạng
+        /// thái đơn. Việc nhỏ thì để dành tính phí lúc quyết toán; việc nặng thì tự mở tranh chấp.
+        [HttpPost("{khoa}/incidents")]
+        public async Task<ActionResult<IncidentDto>> ReportIncident(string khoa, ReportIncidentRequest req)
+        {
+            if (string.IsNullOrWhiteSpace(req.Note))
+                throw new BizException("INVALID_INPUT", "Phải ghi rõ sự cố là gì");
+
+            var loai = string.IsNullOrWhiteSpace(req.Type) ? LoaiSuCo.Khac : req.Type;
+            if (!LoaiSuCo.HopLe.Contains(loai))
+                throw new BizException("INVALID_INPUT", $"Mức độ lạ: {loai}");
+
+            var don = await LayDonLienQuan(khoa);
+            if (don.Status != TrangThaiDon.DangThue)
+                throw new BizException("WRONG_STATE", "Chỉ báo sự cố khi đang trong chuyến đi");
+
+            var suCo = new Incident
+            {
+                BookingId = don.Id,
+                ReportedBy = UserId == don.RenterId ? Ben.Khach : Ben.ChuXe,
+                Type = loai,
+                Note = req.Note
+            };
+            foreach (var url in req.PhotoUrls ?? new List<string>())
+                suCo.Photos.Add(new IncidentPhoto { Url = url });
+
+            _db.Incidents.Add(suCo);
+            await _db.SaveChangesAsync();
+
+            var benKia = UserId == don.RenterId ? don.Car.OwnerId : don.RenterId;
+            await _tb.Gui(benKia, "Có báo cáo sự cố", $"Đơn {don.Code}: {req.Note}", don.Code);
+
+            // Vận hành phải biết NGAY, không phải tự dò từng đơn — va chạm thì kèm gợi ý
+            // hướng xử lý bảo hiểm luôn, đỡ mất công người vận hành tra lại giấy tờ xe.
+            var noiDungVanHanh = loai == LoaiSuCo.VaCham
+                ? $"Đơn {don.Code}: VA CHẠM — {req.Note}. Xem giấy bảo hiểm TNDS của xe " +
+                  $"(hồ sơ xe #{don.CarId}) để hướng dẫn chủ xe làm bồi thường nếu cần."
+                : $"Đơn {don.Code}: {req.Note}";
+            await _tb.GuiChoVanHanh("Có báo cáo sự cố giữa chuyến", noiDungVanHanh, don.Code);
+
+            return suCo.ToDto();
+        }
+
+        /// POST /bookings/{id}/extend-request — khách xin kéo dài chuyến, chờ chủ xe duyệt vì
+        /// còn phải kiểm tra lịch xe. Duyệt xong tiền phát sinh thành khoản nợ, xem
+        /// OwnerBookingsController.ExtendApprove và AdminBookingsController debt-paid có sẵn.
+        [HttpPost("{khoa}/extend-request")]
+        public async Task<ActionResult<BookingDto>> ExtendRequest(string khoa, ExtendRequestRequest req)
+        {
+            var don = await LayDonLienQuan(khoa);
+            if (UserId != don.RenterId)
+                throw new BizException("FORBIDDEN", "Chỉ khách thuê xin gia hạn được");
+            if (don.Status != TrangThaiDon.DangThue)
+                throw new BizException("WRONG_STATE", "Chỉ xin gia hạn khi đang trong chuyến đi");
+            if (req.NewEndDate <= don.EndDate)
+                throw new BizException("INVALID_INPUT", "Ngày trả mới phải sau ngày trả hiện tại");
+
+            don.ExtendRequestedEndDate = req.NewEndDate;
+            don.ExtendRequestedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync();
+
+            await _tb.Gui(don.Car.OwnerId, "Khách xin gia hạn",
+                $"Đơn {don.Code}: khách muốn trả xe {req.NewEndDate:dd/MM} thay vì {don.EndDate:dd/MM}.", don.Code);
+            return don.ToDto();
         }
 
         private async Task<Booking> LayDonLienQuan(string khoa)

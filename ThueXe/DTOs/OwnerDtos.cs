@@ -45,7 +45,10 @@ namespace ThueXe.Dtos
         long PricePerDay, long RentTotal, long Deposit, long Commission,
         string Status, DateTimeOffset? HoldExpiresAt, string? CancelReason,
         DateTimeOffset CreatedAt,
-        long DebtAmount = 0, DateTimeOffset? DebtPaidAt = null);
+        long DebtAmount = 0, DateTimeOffset? DebtPaidAt = null,
+        string? PreDisputeStatus = null, string? DisputeReason = null,
+        string? DisputeOpenedBy = null, DateTimeOffset? DisputeOpenedAt = null,
+        DateOnly? ExtendRequestedEndDate = null, DateTimeOffset? ExtendRequestedAt = null);
 
     public record PaymentDto(
         long Id, long BookingId, long Amount, string TransferCode, string QrUrl,
@@ -55,7 +58,8 @@ namespace ThueXe.Dtos
 
     public record BookingDetailDto(
         BookingDto Booking, PaymentDto? Payment,
-        List<HandoverDto> Handovers, List<ChargeDto> Charges);
+        List<HandoverDto> Handovers, List<ChargeDto> Charges,
+        List<IncidentDto>? Incidents = null);
 
     public record RejectBookingRequest(string Reason);
 
@@ -79,6 +83,22 @@ namespace ThueXe.Dtos
     public record AddHandoverPhotosRequest(List<HandoverPhotoRequest> Photos);
 
     public record ReviewHandoverRequest(bool Agreed, string? Objection, string? Signature);
+
+    // ── Tranh chấp ────────────────────────────────────────────────────
+    public record OpenDisputeRequest(string Reason);
+
+    // ── Sự cố giữa chuyến ─────────────────────────────────────────────
+    public record IncidentPhotoRequest(string Url);
+
+    /// Type: VA_CHAM | KHAC (mặc định KHAC nếu bỏ trống) — xem Common.LoaiSuCo.
+    public record ReportIncidentRequest(string Note, string? Type, List<string>? PhotoUrls);
+
+    public record IncidentDto(
+        long Id, long BookingId, string ReportedBy, string Type, string Note,
+        DateTimeOffset CreatedAt, List<string> PhotoUrls);
+
+    // ── Gia hạn ───────────────────────────────────────────────────────
+    public record ExtendRequestRequest(DateOnly NewEndDate);
 
     // ── Chi trả ───────────────────────────────────────────────────────
     public record PayoutDto(

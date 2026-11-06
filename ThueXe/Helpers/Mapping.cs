@@ -29,7 +29,13 @@ namespace ThueXe.Helpers
             b.Renter is null ? null : b.Renter.ToBrief(b.Status, renterDocStatus),
             b.StartDate, b.EndDate, b.Days, b.PricePerDay, b.RentTotal,
             b.Deposit, b.Commission, b.Status, b.HoldExpiresAt, b.CancelReason, b.CreatedAt,
-            b.DebtAmount, b.DebtPaidAt);
+            b.DebtAmount, b.DebtPaidAt,
+            b.PreDisputeStatus, b.DisputeReason, b.DisputeOpenedBy, b.DisputeOpenedAt,
+            b.ExtendRequestedEndDate, b.ExtendRequestedAt);
+
+        public static IncidentDto ToDto(this Incident i) => new(
+            i.Id, i.BookingId, i.ReportedBy, i.Type, i.Note, i.CreatedAt,
+            i.Photos.Select(p => p.Url).ToList());
 
         public static HandoverDto ToDto(this Handover h) => new(
             h.Id, h.BookingId, h.Kind, h.CreatedBy, h.Odo, h.FuelLevel, h.Note,
@@ -61,7 +67,8 @@ namespace ThueXe.Helpers
 
         public static PayoutAdminDto ToAdminDto(this Payout p, string? bookingCode, AppUser payee) => new(
             p.Id, p.BookingId, bookingCode, p.PayeeType, payee.ToTomTat(),
-            p.BankAccount, p.BankName, p.Amount, p.Status, p.TransferRef, p.PaidAt, p.CreatedAt);
+            p.BankAccount, p.BankName, p.Amount, p.Status, p.TransferRef, p.PaidAt, p.CreatedAt,
+            p.FailNote);
 
         public static PayoutDto ToDto(this Payout p, string? bookingCode) => new(
             p.Id, p.BookingId, bookingCode, p.PayeeType, p.BankAccount, p.BankName,

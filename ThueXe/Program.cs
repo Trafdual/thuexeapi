@@ -71,6 +71,7 @@ builder.Services.AddSingleton<FcmSender>();
 builder.Services.AddScoped<ThongBaoService>();
 builder.Services.AddScoped<DuLieuMauService>();
 builder.Services.AddScoped<ThanhToanService>();
+builder.Services.AddScoped<HoanTraService>();
 
 // Nam tac vu nen don don treo — thieu chung thi lich xe bi khoa chet.
 builder.Services.AddHostedService<ThueXe.Jobs.DonTreoService>();

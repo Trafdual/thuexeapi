@@ -14,6 +14,11 @@ namespace ThueXe.Common
         public const string HetHan = "HET_HAN";
         public const string DaHuy = "DA_HUY";
 
+        /// Biên bản trả bị phản đối, hoặc quá hạn không ai xử lý — đơn đứng lại chờ
+        /// người vận hành phân xử qua /admin/bookings/{khoa}/dispute/resolve.
+        /// Trạng thái trước đó được giữ ở Booking.PreDisputeStatus để RESUME quay lại đúng chỗ.
+        public const string TranhChap = "TRANH_CHAP";
+
         public static readonly string[] DaDong =
             { HoanTat, BiTuChoi, HetHan, DaHuy };
     }
@@ -49,6 +54,16 @@ namespace ThueXe.Common
     {
         public static readonly string[] BatBuoc =
             { "TRUOC", "SAU", "TRAI", "PHAI", "TAPLO", "ODO" };
+    }
+
+    /// Người báo tự chọn mức độ lúc báo sự cố — VA_CHAM thì gợi ý luôn hướng bảo hiểm
+    /// trong thông báo gửi vận hành, xem BookingsController.ReportIncident.
+    public static class LoaiSuCo
+    {
+        public const string VaCham = "VA_CHAM";
+        public const string Khac = "KHAC";
+
+        public static readonly string[] HopLe = { VaCham, Khac };
     }
 }
 
@@ -106,6 +121,12 @@ namespace ThueXe.Common
         public const string NoPhatSinh = "DEBT";
         /// Huỷ đơn đã thanh toán: chia tiền thuê theo chính sách huỷ, cọc luôn hoàn đủ.
         public const string HuyDon = "CANCEL";
+        /// Khách không tới nhận xe: hoàn cọc, tiền thuê đền bù cho chủ xe.
+        public const string KhachKhongNhanXe = "NO_SHOW";
+        /// Khách chuyển thiếu rồi phiếu thu hết hạn: hoàn lại đúng số đã nhận.
+        public const string HoanThieuTien = "REFUND_PARTIAL";
+        /// Kết luận tranh chấp: hoàn hoặc đền bù theo quyết định của người vận hành.
+        public const string TranhChap = "DISPUTE";
     }
 
     public static class LoaiPhi
@@ -113,6 +134,16 @@ namespace ThueXe.Common
         public const string QuaGio = "QUA_GIO";
         public const string QuaKm = "QUA_KM";
         public const string NhienLieu = "NHIEN_LIEU";
+        /// Trầy xước, móp, hư hỏng nội thất — mọi thứ không phải ba loại đo được ở trên.
+        public const string HuHong = "HU_HONG";
+        public const string VeSinh = "VE_SINH";
+        public const string MatPhuKien = "MAT_PHU_KIEN";
+        /// Phạt nguội về sau khi đơn đã đóng — xem AdminBookingsController.LateFine.
+        public const string PhatNguoi = "PHAT_NGUOI";
+        public const string PhiCauDuong = "PHI_CAU_DUONG";
+        public const string PhiDoXe = "PHI_DO_XE";
+        /// Xe phải nghỉ sửa vì lỗi của khách — tính theo giá thuê/ngày, xem Điều 5 hợp đồng mẫu.
+        public const string NgayNghiSua = "NGAY_NGHI_SUA";
     }
 }
 

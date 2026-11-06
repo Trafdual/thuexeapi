@@ -46,8 +46,17 @@ namespace ThueXe.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("IncidentCount")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsLocked")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsOwner")
                         .HasColumnType("bit");
+
+                    b.Property<string>("LockReason")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
@@ -112,14 +121,38 @@ namespace ThueXe.Migrations
                     b.Property<long>("Deposit")
                         .HasColumnType("bigint");
 
+                    b.Property<DateTimeOffset?>("DisputeOpenedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("DisputeOpenedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("DisputeReason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<long?>("DisputeResolvedBy")
+                        .HasColumnType("bigint");
+
                     b.Property<DateOnly>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset?>("ExtendRequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateOnly?>("ExtendRequestedEndDate")
                         .HasColumnType("date");
 
                     b.Property<DateTimeOffset?>("HoldExpiresAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("PreDisputeStatus")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<long>("PricePerDay")
                         .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("ReadyToSettleAt")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<long>("RentTotal")
                         .HasColumnType("bigint");
@@ -505,6 +538,63 @@ namespace ThueXe.Migrations
                     b.ToTable("IdDocuments");
                 });
 
+            modelBuilder.Entity("ThueXe.Models.Incident", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BookingId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ReportedBy")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("nvarchar(max)")
+                        .HasDefaultValue("KHAC");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookingId");
+
+                    b.ToTable("Incidents");
+                });
+
+            modelBuilder.Entity("ThueXe.Models.IncidentPhoto", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("IncidentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IncidentId");
+
+                    b.ToTable("IncidentPhotos");
+                });
+
             modelBuilder.Entity("ThueXe.Models.LedgerEntry", b =>
                 {
                     b.Property<long>("Id")
@@ -665,6 +755,9 @@ namespace ThueXe.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("FailNote")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTimeOffset?>("PaidAt")
                         .HasColumnType("datetimeoffset");
 
@@ -799,6 +892,28 @@ namespace ThueXe.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ThueXe.Models.Incident", b =>
+                {
+                    b.HasOne("ThueXe.Models.Booking", "Booking")
+                        .WithMany("Incidents")
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
+                });
+
+            modelBuilder.Entity("ThueXe.Models.IncidentPhoto", b =>
+                {
+                    b.HasOne("ThueXe.Models.Incident", "Incident")
+                        .WithMany("Photos")
+                        .HasForeignKey("IncidentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Incident");
+                });
+
             modelBuilder.Entity("ThueXe.Models.LedgerEntry", b =>
                 {
                     b.HasOne("ThueXe.Models.Booking", "Booking")
@@ -858,6 +973,8 @@ namespace ThueXe.Migrations
 
                     b.Navigation("Handovers");
 
+                    b.Navigation("Incidents");
+
                     b.Navigation("Payments");
                 });
 
@@ -873,6 +990,11 @@ namespace ThueXe.Migrations
                 });
 
             modelBuilder.Entity("ThueXe.Models.Handover", b =>
+                {
+                    b.Navigation("Photos");
+                });
+
+            modelBuilder.Entity("ThueXe.Models.Incident", b =>
                 {
                     b.Navigation("Photos");
                 });

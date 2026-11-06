@@ -13,10 +13,15 @@ namespace ThueXe.Controllers
 
         private readonly ThongBaoService _tb;
 
-        public AdminBookingsController(ApplicationDbContext db, ThongBaoService tb)
+        private readonly HoanTraService _hoanTra;
+
+        private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        public AdminBookingsController(ApplicationDbContext db, ThongBaoService tb, HoanTraService hoanTra)
         {
             _db = db;
             _tb = tb;
+            _hoanTra = hoanTra;
         }
 
         // GET /admin/bookings?status= — toàn bộ đơn của sàn, mới nhất trước
@@ -58,6 +63,8 @@ namespace ThueXe.Controllers
             var bienBan = await _db.Handovers.Include(h => h.Photos)
                 .Where(h => h.BookingId == don.Id).ToListAsync();
             var phi = await _db.Charges.Where(c => c.BookingId == don.Id).ToListAsync();
+            var suCo = await _db.Incidents.Include(i => i.Photos)
+                .Where(i => i.BookingId == don.Id).ToListAsync();
             var giayTo = await _db.IdDocuments.Where(d => d.UserId == don.RenterId)
                 .OrderByDescending(d => d.Id).Select(d => d.Status).FirstOrDefaultAsync();
 
@@ -68,7 +75,121 @@ namespace ThueXe.Controllers
                     thanhToan.QrUrl, thanhToan.Status, thanhToan.ReceivedAmount,
                     thanhToan.ConfirmedAt, thanhToan.BankNote),
                 bienBan.Select(h => h.ToDto()).ToList(),
-                phi.Select(c => new ChargeDto(c.Id, c.Type, c.Amount, c.Note)).ToList());
+                phi.Select(c => new ChargeDto(c.Id, c.Type, c.Amount, c.Note)).ToList(),
+                suCo.Select(i => i.ToDto()).ToList());
+        }
+
+        // POST /admin/bookings/{id}/dispute/resolve — kết luận một vụ tranh chấp.
+        [HttpPost("{khoa}/dispute/resolve")]
+        public async Task<ActionResult<BookingDto>> ResolveDispute(string khoa, ResolveDisputeRequest req)
+        {
+            var don = await _db.Bookings
+                .Include(b => b.Car).ThenInclude(c => c.Photos)
+                .Include(b => b.Renter)
+                .TheoKhoa(khoa)
+                .FirstOrDefaultAsync()
+                ?? throw new BizException("NOT_FOUND", "Không tìm thấy đơn");
+
+            if (don.Status != TrangThaiDon.TranhChap)
+                throw new BizException("WRONG_STATE", "Đơn này không ở trạng thái tranh chấp");
+
+            switch (req.Outcome)
+            {
+                case "RESUME":
+                    if (don.PreDisputeStatus is null)
+                        throw new BizException("WRONG_STATE", "Đơn này không có trạng thái để quay lại, dùng CANCEL_*");
+                    don.Status = don.PreDisputeStatus;
+                    don.PreDisputeStatus = null;
+                    break;
+
+                // Lỗi thuộc chủ xe (không giao xe, xe không đúng cam kết…): huỷ đơn, hoàn 100%
+                // tiền thuê + cọc cho khách.
+                case "CANCEL_REFUND_RENTER":
+                    ChanHuyKhiDaChayXongChuyen(don);
+                    await HuyVaChiaTien(don, hoanKhach: don.RentTotal + don.Deposit, denBuChuXe: 0);
+                    await GhiNhanLoi(don.Car.OwnerId);
+                    break;
+
+                // Lỗi thuộc khách (không tới nhận xe giữa chừng bỏ ngang, gây sự cố…): huỷ đơn,
+                // hoàn cọc, tiền thuê coi như đền bù cho chủ xe — cùng chính sách BookingsController
+                // dùng khi khách chủ động huỷ sát giờ.
+                case "CANCEL_COMPENSATE_OWNER":
+                    ChanHuyKhiDaChayXongChuyen(don);
+                    await HuyVaChiaTien(don, hoanKhach: don.Deposit, denBuChuXe: don.RentTotal);
+                    await GhiNhanLoi(don.RenterId);
+                    break;
+
+                default:
+                    throw new BizException("INVALID_INPUT",
+                        "Outcome phải là RESUME, CANCEL_REFUND_RENTER hoặc CANCEL_COMPENSATE_OWNER");
+            }
+
+            don.DisputeReason = req.Note is null ? don.DisputeReason : $"{don.DisputeReason} — Kết luận: {req.Note}";
+            don.DisputeResolvedBy = UserId;
+            await _db.SaveChangesAsync();
+
+            await _tb.Gui(don.RenterId, "Tranh chấp đã có kết luận", $"Đơn {don.Code} đã xử lý xong.", don.Code);
+            await _tb.Gui(don.Car.OwnerId, "Tranh chấp đã có kết luận", $"Đơn {don.Code} đã xử lý xong.", don.Code);
+            return don.ToDto();
+        }
+
+        /// Tranh chấp mở từ CHO_QUYET_TOAN nghĩa là chuyến đã chạy xong, chỉ đang cãi nhau về
+        /// TIỀN PHÍ — không phải về việc có nên đi chuyến hay không. Huỷ cả đơn trong trường hợp
+        /// này là hoàn oan cho khách hoặc mất trắng cho chủ xe dù chuyến đã hoàn thành bình
+        /// thường; đường đúng là RESUME rồi chốt lại phí qua /settle với charges đã sửa.
+        private void ChanHuyKhiDaChayXongChuyen(Booking don)
+        {
+            if (don.PreDisputeStatus == TrangThaiDon.ChoQuyetToan)
+                throw new BizException("WRONG_STATE",
+                    "Chuyến đã chạy xong, chỉ RESUME rồi chốt lại phí qua /settle, không huỷ cả đơn được");
+        }
+
+        private async Task HuyVaChiaTien(Booking don, long hoanKhach, long denBuChuXe)
+        {
+            don.Status = TrangThaiDon.DaHuy;
+            don.PreDisputeStatus = null;
+            var dong = await _db.CarAvailabilities.Where(a => a.BookingId == don.Id).ToListAsync();
+            _db.CarAvailabilities.RemoveRange(dong);
+
+            await _hoanTra.ChiTuViTreo(don.Id, Ben.Khach, don.RenterId, hoanKhach, LoaiChungTu.TranhChap);
+            await _hoanTra.ChiTuViTreo(don.Id, Ben.ChuXe, don.Car.OwnerId, denBuChuXe, LoaiChungTu.TranhChap);
+        }
+
+        private async Task GhiNhanLoi(long userId)
+        {
+            var u = await _db.AppUsers.FindAsync(userId);
+            if (u is not null) u.IncidentCount++;
+        }
+
+        // POST /admin/bookings/{id}/late-fine — phạt nguội hoặc chi phí phát sinh phát hiện
+        // SAU khi đơn đã đóng (biên lai phạt nguội thường về muộn cả tuần). Cộng vào DebtAmount
+        // — cùng cơ chế khoá đặt đơn mới đang dùng cho phí vượt cọc, khách phải trả mới đặt
+        // được chuyến tiếp theo.
+        [HttpPost("{khoa}/late-fine")]
+        public async Task<ActionResult<BookingDto>> LateFine(string khoa, LateFineRequest req)
+        {
+            if (req.Amount <= 0)
+                throw new BizException("INVALID_INPUT", "Số tiền phải lớn hơn 0");
+            if (string.IsNullOrWhiteSpace(req.Note))
+                throw new BizException("INVALID_INPUT", "Phải ghi rõ lý do");
+
+            var don = await _db.Bookings.TheoKhoa(khoa).FirstOrDefaultAsync()
+                ?? throw new BizException("NOT_FOUND", "Không tìm thấy đơn");
+            if (don.Status != TrangThaiDon.HoanTat)
+                throw new BizException("WRONG_STATE", "Chỉ ghi phạt nguội cho đơn đã hoàn tất");
+
+            _db.Charges.Add(new Charge
+            {
+                BookingId = don.Id, Type = LoaiPhi.PhatNguoi, Amount = req.Amount, Note = req.Note
+            });
+            don.DebtAmount += req.Amount;
+            don.DebtPaidAt = null;
+            await _db.SaveChangesAsync();
+
+            await _tb.Gui(don.RenterId, "Có khoản phạt nguội mới",
+                $"Đơn {don.Code}: {req.Note}, số tiền {req.Amount:N0}đ. Thanh toán trước khi đặt chuyến mới.",
+                don.Code);
+            return don.ToDto();
         }
 
         // POST /admin/bookings/{id}/debt-paid — khách đã chuyển khoản trả nợ, ghi vào ví treo
@@ -245,7 +366,14 @@ namespace ThueXe.Controllers
 
         private List<Charge> TuDanhSach(List<ChargeRequest> ds)
         {
-            var hopLe = new[] { LoaiPhi.QuaGio, LoaiPhi.QuaKm, LoaiPhi.NhienLieu };
+            var hopLe = new[]
+            {
+                LoaiPhi.QuaGio, LoaiPhi.QuaKm, LoaiPhi.NhienLieu, LoaiPhi.HuHong,
+                LoaiPhi.VeSinh, LoaiPhi.MatPhuKien, LoaiPhi.PhiCauDuong, LoaiPhi.PhiDoXe,
+                LoaiPhi.NgayNghiSua
+                // LoaiPhi.PhatNguoi KHÔNG ở đây: phạt nguội đi qua /late-fine sau khi đơn đã
+                // đóng, không phải phí chốt lúc quyết toán bình thường.
+            };
             foreach (var c in ds)
             {
                 if (!hopLe.Contains(c.Type))
@@ -271,8 +399,12 @@ namespace ThueXe.Controllers
                 throw new BizException("INVALID_INPUT",
                     "Thiếu biên bản giao hoặc trả, không tự tính phí được. Gửi kèm charges.");
 
-            var treGio = (int)Math.Max(0,
-                Math.Ceiling((tra.CreatedAt - don.EndDate.ToDateTime(TimeOnly.MinValue)).TotalHours));
+            // "Ngày trả không tính tiền" (xem BookingsController.KiemNgay) nghĩa là khách được
+            // trả xe BẤT KỲ LÚC NÀO trong ngày EndDate — hạn chót là nửa đêm bước sang ngày
+            // hôm sau, không phải 00:00 của chính ngày EndDate. Trước đây tính từ 00:00 ngày
+            // EndDate nên trả xe lúc 9 giờ sáng đúng hẹn vẫn bị tính trễ 9 giờ.
+            var hanTra = GioVN.LucNuaDem(don.EndDate.AddDays(1));
+            var treGio = (int)Math.Max(0, Math.Ceiling((tra.CreatedAt - hanTra).TotalHours));
 
             var phi = PhiPhatSinhService.Tinh(
                 don.PricePerDay, don.Days, don.Car.MaxKmDay,

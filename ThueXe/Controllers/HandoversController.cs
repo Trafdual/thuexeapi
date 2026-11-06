@@ -11,10 +11,13 @@ namespace ThueXe.Controllers
 
         private readonly ThongBaoService _tb;
 
-        public HandoversController(ApplicationDbContext db, ThongBaoService tb)
+        private readonly HoanTraService _hoanTra;
+
+        public HandoversController(ApplicationDbContext db, ThongBaoService tb, HoanTraService hoanTra)
         {
             _db = db;
             _tb = tb;
+            _hoanTra = hoanTra;
         }
 
         private long UserId => long.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -83,8 +86,9 @@ namespace ThueXe.Controllers
                 bienBan.Status = TrangThaiBienBan.PhanDoi;
                 bienBan.Objection = req.Objection;
 
-                // D1: khách soi biên bản giao mà không đồng ý thì không nhận xe, đơn huỷ.
-                // E9: chủ xe phản đối biên bản trả thì đơn đứng lại chờ người vận hành xử.
+                // D1: khách soi biên bản giao mà không đồng ý thì không nhận xe, đơn huỷ,
+                // hoàn lại toàn bộ tiền thuê + cọc — khách chưa nhận xe nên không có lỗi gì
+                // để mà trừ.
                 if (bienBan.Kind == LoaiBienBan.Giao)
                 {
                     don.Status = TrangThaiDon.DaHuy;
@@ -93,6 +97,23 @@ namespace ThueXe.Controllers
                     var dong = await _db.CarAvailabilities
                         .Where(a => a.BookingId == don.Id).ToListAsync();
                     _db.CarAvailabilities.RemoveRange(dong);
+
+                    await _hoanTra.ChiTuViTreo(don.Id, Ben.Khach, don.RenterId,
+                        don.RentTotal + don.Deposit, LoaiChungTu.HuyDon);
+                }
+                else
+                {
+                    // E9: chủ xe phản đối biên bản trả thì đơn không tự đứng yên vô thời hạn
+                    // nữa — chuyển hẳn sang TRANH_CHAP để hiện lên hàng chờ của người vận hành,
+                    // giữ nguyên DangThue ở PreDisputeStatus để RESUME quay lại đúng chỗ.
+                    don.PreDisputeStatus = don.Status;
+                    don.Status = TrangThaiDon.TranhChap;
+                    don.DisputeReason = req.Objection;
+                    don.DisputeOpenedBy = ben;
+                    don.DisputeOpenedAt = DateTimeOffset.UtcNow;
+                    don.DisputeResolvedBy = null;
+                    await _tb.GuiChoVanHanh("Biên bản trả bị phản đối",
+                        $"Đơn {don.Code}: {req.Objection}", don.Code);
                 }
             }
 

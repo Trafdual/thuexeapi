@@ -39,6 +39,24 @@ namespace ThueXe.Models
         /// Đã gửi thông báo nhắc giao xe chưa — gửi đúng một lần, xem DonTreoService.NhacGiaoXe.
         public bool DaNhacGiaoXe { get; set; }
 
+        /// Đủ 24 giờ khách im lặng sau biên bản trả, coi như đồng ý — đánh dấu MỘT LẦN để
+        /// người vận hành thấy đơn nào cần chốt trước, xem DonTreoService.TuChotSau24Gio.
+        public DateTimeOffset? ReadyToSettleAt { get; set; }
+
+        /// Bốn cột tranh chấp: đơn đứng ở TRANH_CHAP thì PreDisputeStatus giữ trạng thái cũ để
+        /// RESUME quay lại đúng chỗ, xem AdminBookingsController.ResolveDispute.
+        public string? PreDisputeStatus { get; set; }
+        public string? DisputeReason { get; set; }
+        /// CHU_XE | KHACH | null (hệ thống tự mở do quá hạn không ai xử lý).
+        public string? DisputeOpenedBy { get; set; }
+        public DateTimeOffset? DisputeOpenedAt { get; set; }
+        public long? DisputeResolvedBy { get; set; }
+
+        /// Khách xin gia hạn, chờ chủ xe duyệt — xem BookingsController.ExtendRequest và
+        /// OwnerBookingsController.ExtendApprove/ExtendReject.
+        public DateOnly? ExtendRequestedEndDate { get; set; }
+        public DateTimeOffset? ExtendRequestedAt { get; set; }
+
         public DateTimeOffset CreatedAt { get; set; }
             = DateTimeOffset.UtcNow;
 
@@ -54,5 +72,8 @@ namespace ThueXe.Models
 
         public ICollection<Charge> Charges { get; set; }
             = new List<Charge>();
+
+        public ICollection<Incident> Incidents { get; set; }
+            = new List<Incident>();
     }
 }

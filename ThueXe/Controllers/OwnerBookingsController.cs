@@ -7,6 +7,9 @@ namespace ThueXe.Controllers
     [Authorize]
     public class OwnerBookingsController : ControllerBase
     {
+        /// Cùng tỷ lệ với BookingsController.Create — đơn gốc và phần gia hạn tính hoa hồng như nhau.
+        private const int HoaHongPhanTram = 15;
+
         private readonly ApplicationDbContext _db;
         private readonly QrService _qr;
 
@@ -103,6 +106,67 @@ namespace ThueXe.Controllers
 
             await _db.SaveChangesAsync();
             await _tb.Gui(don.RenterId, "Chủ xe từ chối đơn", $"Đơn {don.Code}: {req.Reason}", don.Code);
+            return (await KemTrangThaiGiayTo(new List<Booking> { don })).Value!.Single();
+        }
+
+        // POST /owner/bookings/{id}/extend-approve — duyệt gia hạn: khoá thêm ngày, cộng tiền
+        // thuê và ghi thành nợ khách (cùng cơ chế phí vượt cọc, ép trả trước khi đặt chuyến mới).
+        [HttpPost("{khoa}/extend-approve")]
+        public async Task<ActionResult<BookingDto>> ExtendApprove(string khoa)
+        {
+            var don = await LayDonCuaXeToi(khoa);
+            if (don.ExtendRequestedEndDate is not { } ngayMoi)
+                throw new BizException("WRONG_STATE", "Đơn này không có yêu cầu gia hạn nào đang chờ");
+
+            var ngayCu = don.EndDate;
+            var soNgayThem = ngayMoi.DayNumber - ngayCu.DayNumber;
+
+            await using var giaoDich = await _db.Database.BeginTransactionAsync();
+            try
+            {
+                // Ngày cũ (EndDate) đã khoá riêng cho đơn này rồi, chỉ cần khoá thêm từ hôm sau.
+                for (var d = ngayCu.AddDays(1); d <= ngayMoi; d = d.AddDays(1))
+                    _db.CarAvailabilities.Add(new CarAvailability { CarId = don.CarId, Day = d, BookingId = don.Id });
+                await _db.SaveChangesAsync();
+                await giaoDich.CommitAsync();
+            }
+            catch (DbUpdateException)
+            {
+                await giaoDich.RollbackAsync();
+                throw new BizException("SLOT_TAKEN", "Những ngày gia hạn thêm vừa có người khác đặt mất rồi");
+            }
+
+            var tienThem = soNgayThem * don.PricePerDay;
+            don.EndDate = ngayMoi;
+            don.Days += soNgayThem;
+            don.RentTotal += tienThem;
+            don.Commission += tienThem * HoaHongPhanTram / 100;
+            don.DebtAmount += tienThem;
+            don.DebtPaidAt = null;
+            don.ExtendRequestedEndDate = null;
+            don.ExtendRequestedAt = null;
+            await _db.SaveChangesAsync();
+
+            await _tb.Gui(don.RenterId, "Chủ xe đã duyệt gia hạn",
+                $"Đơn {don.Code}: trả xe {ngayMoi:dd/MM}, phát sinh thêm {tienThem:N0}đ. " +
+                "Thanh toán trước khi đặt chuyến mới.", don.Code);
+            return (await KemTrangThaiGiayTo(new List<Booking> { don })).Value!.Single();
+        }
+
+        // POST /owner/bookings/{id}/extend-reject — từ chối gia hạn
+        [HttpPost("{khoa}/extend-reject")]
+        public async Task<ActionResult<BookingDto>> ExtendReject(string khoa)
+        {
+            var don = await LayDonCuaXeToi(khoa);
+            if (don.ExtendRequestedEndDate is null)
+                throw new BizException("WRONG_STATE", "Đơn này không có yêu cầu gia hạn nào đang chờ");
+
+            don.ExtendRequestedEndDate = null;
+            don.ExtendRequestedAt = null;
+            await _db.SaveChangesAsync();
+
+            await _tb.Gui(don.RenterId, "Chủ xe từ chối gia hạn",
+                $"Đơn {don.Code}: chủ xe không đồng ý gia hạn, vẫn trả xe {don.EndDate:dd/MM}.", don.Code);
             return (await KemTrangThaiGiayTo(new List<Booking> { don })).Value!.Single();
         }
 
